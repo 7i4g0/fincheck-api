@@ -16,7 +16,6 @@ export const env: Env = plainToInstance(Env, {
   dbURL: process.env.DATABASE_URL,
   jwtSecret: process.env.JWT_SECRET,
 });
-console.log('🚀 ~ process.env.JWT_SECRET:', process.env.DATABASE_URL);
 
 const errors = validateSync(env);
 
