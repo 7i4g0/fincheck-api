@@ -2,6 +2,8 @@
 
 Application of financial management in Javascript for study purposes
 
+___
+
 ## Docker is required to run the application.
 If you already have the database running, you can skip this step and only run  `docker start pg`.
 
