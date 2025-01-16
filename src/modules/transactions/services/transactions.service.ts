@@ -53,6 +53,15 @@ export class TransactionsService {
           lte: new Date(filters.year, filters.month, 0),
         },
       },
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            icon: true,
+          },
+        },
+      },
     });
   }
 
