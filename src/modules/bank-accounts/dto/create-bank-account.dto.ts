@@ -9,19 +9,19 @@ import { BankAccountType } from '../entities/BankAccount';
 
 export class CreateBankAccountDto {
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'O nome da conta bancária é obrigatório' })
   name: string;
 
   @IsNumber()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'O saldo inicial é obrigatório' })
   initialBalance: number;
 
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'O tipo da conta bancária é obrigatório' })
   @IsEnum(BankAccountType)
   type: BankAccountType;
 
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'A cor da conta bancária é obrigatório' })
   @IsHexColor()
   color: string;
 }

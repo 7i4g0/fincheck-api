@@ -22,12 +22,12 @@ export class CreateTransactionDto {
   categoryId: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'O nome da transação é obrigatório' })
   name: string;
 
   @IsNumber()
   @IsNotEmpty()
-  @IsPositive()
+  @IsPositive({ message: 'O valor deve ser positivo' })
   value: number;
 
   @IsNotEmpty()
