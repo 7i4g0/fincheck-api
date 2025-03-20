@@ -2,15 +2,19 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import 'dotenv/config';
-import * as express from 'express';
+import express from 'express';
 import { AppModule } from './app.module';
 
-const server = express();
+// Criando a instância do express corretamente
+const expressApp = express();
 
 async function bootstrap() {
   try {
     console.log('Iniciando aplicação...');
-    const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
+    const app = await NestFactory.create(
+      AppModule,
+      new ExpressAdapter(expressApp),
+    );
     console.log('App criado com sucesso');
 
     app.useGlobalPipes(new ValidationPipe());
@@ -44,6 +48,6 @@ if (process.env.NODE_ENV !== 'production') {
 // Para Vercel
 export default async function handler(req: any, res: any) {
   const app = await bootstrap();
-  const expressInstance = app.getHttpAdapter().getInstance();
-  return expressInstance(req, res);
+  const instance = app.getHttpAdapter().getInstance();
+  return instance(req, res);
 }
