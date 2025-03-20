@@ -5,7 +5,7 @@
       "src": "src/main.ts",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["src/**/*"]
+        "maxLambdaSize": "15mb"
       }
     }
   ],
@@ -23,7 +23,8 @@
       ],
       "headers": {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "*"
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS"
       }
     }
   ],
