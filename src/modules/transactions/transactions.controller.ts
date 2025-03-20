@@ -1,6 +1,3 @@
-import { ActiveUserId } from '@/shared/decorators/ActiveUserId';
-import { ParseEnumPipeOptional } from '@/shared/pipes/ParseEnumPipeOptional';
-import { ParseUUIDPipeOptional } from '@/shared/pipes/ParseUUIDPipeOptional';
 import {
   Body,
   Controller,
@@ -15,6 +12,9 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { ActiveUserId } from '../../shared/decorators/ActiveUserId';
+import { ParseEnumPipeOptional } from '../../shared/pipes/ParseEnumPipeOptional';
+import { ParseUUIDPipeOptional } from '../../shared/pipes/ParseUUIDPipeOptional';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { TransactionType } from './entities/Transaction';

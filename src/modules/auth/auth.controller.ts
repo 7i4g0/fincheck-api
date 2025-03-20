@@ -1,5 +1,5 @@
-import { IsPublic } from '@/shared/decorators/IsPublic';
 import { Body, Controller, Post } from '@nestjs/common';
+import { IsPublic } from '../../shared/decorators/IsPublic';
 import { AuthService } from './auth.service';
 import { SigninDto } from './dto/signin.dto';
 import { SignupDto } from './dto/signup.dto';

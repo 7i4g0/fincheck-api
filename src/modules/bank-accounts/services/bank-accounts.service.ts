@@ -1,5 +1,5 @@
-import { BankAccountsRepository } from '@/shared/database/repositories/bank-accounts.repositories';
 import { Injectable } from '@nestjs/common';
+import { BankAccountsRepository } from '../../../shared/database/repositories/bank-accounts.repositories';
 import { CreateBankAccountDto } from '../dto/create-bank-account.dto';
 import { UpdateBankAccountDto } from '../dto/update-bank-account.dto';
 import { VerifyBankAccountOwnershipService } from './verify-bank-account-ownership.service';

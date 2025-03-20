@@ -1,4 +1,3 @@
-import { UsersRepository } from '@/shared/database/repositories/users.repositories';
 import {
   ConflictException,
   Injectable,
@@ -7,6 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { User } from '@prisma/client';
 import { compare, hash } from 'bcryptjs';
+import { UsersRepository } from '../../shared/database/repositories/users.repositories';
 import { SigninDto } from './dto/signin.dto';
 import { SignupDto } from './dto/signup.dto';
 
