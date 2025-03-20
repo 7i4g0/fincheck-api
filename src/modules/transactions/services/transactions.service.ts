@@ -1,7 +1,7 @@
+import { VerifyBankAccountOwnershipService } from '@/modules/bank-accounts/services/verify-bank-account-ownership.service';
+import { VerifyCategoryOwnershipService } from '@/modules/categories/services/verify-category-ownership.service';
+import { TransactionsRepository } from '@/shared/database/repositories/transactions.repositories';
 import { Injectable } from '@nestjs/common';
-import { TransactionsRepository } from 'src/shared/database/repositories/transactions.repositories';
-import { VerifyBankAccountOwnershipService } from '../../bank-accounts/services/verify-bank-account-ownership.service';
-import { VerifyCategoryOwnershipService } from '../../categories/services/verify-category-ownership.service';
 import { CreateTransactionDto } from '../dto/create-transaction.dto';
 import { UpdateTransactionDto } from '../dto/update-transaction.dto';
 import { TransactionType } from '../entities/Transaction';
