@@ -16,6 +16,34 @@ export class CreditCardTransactionsService {
     private readonly invoiceService: InvoiceService,
   ) {}
 
+  /**
+   * Adds months to a date while handling month-end edge cases.
+   * When the original day exceeds the target month's length,
+   * it clamps to the last day of that month.
+   *
+   * Example: Jan 31 + 1 month = Feb 28/29 (not Mar 2/3)
+   */
+  private addMonthsToDate(date: Date, monthsToAdd: number): Date {
+    const originalDay = date.getDate();
+    const result = new Date(date);
+
+    // Move to day 1 to avoid overflow, then set the target month
+    result.setDate(1);
+    result.setMonth(result.getMonth() + monthsToAdd);
+
+    // Get the last day of the target month
+    const lastDayOfMonth = new Date(
+      result.getFullYear(),
+      result.getMonth() + 1,
+      0,
+    ).getDate();
+
+    // Use the original day or the last day of the month, whichever is smaller
+    result.setDate(Math.min(originalDay, lastDayOfMonth));
+
+    return result;
+  }
+
   async create(userId: string, createDto: CreateCreditCardTransactionDto) {
     const {
       name,
@@ -55,22 +83,32 @@ export class CreditCardTransactionsService {
     } else {
       // Generate installments transactions
       const installmentGroupId = randomUUID();
-      const installmentValue = Math.round((value / installments) * 100) / 100;
+      const baseInstallmentValue =
+        Math.floor((value / installments) * 100) / 100;
       const purchaseDate = new Date(date);
+
+      // Calculate the remainder to add to the last installment
+      // This ensures the sum of all installments equals the original value
+      const totalOfBaseInstallments = baseInstallmentValue * (installments - 1);
+      const lastInstallmentValue =
+        Math.round((value - totalOfBaseInstallments) * 100) / 100;
 
       const transactionsData = [];
 
       for (let i = 0; i < installments; i++) {
-        const installmentDate = new Date(purchaseDate);
-        installmentDate.setMonth(installmentDate.getMonth() + i);
+        const installmentDate = this.addMonthsToDate(purchaseDate, i);
         transactionDates.push(installmentDate);
+
+        const isLastInstallment = i === installments - 1;
 
         transactionsData.push({
           userId,
           creditCardId,
           categoryId,
           name: `${name} (${i + 1}/${installments})`,
-          value: installmentValue,
+          value: isLastInstallment
+            ? lastInstallmentValue
+            : baseInstallmentValue,
           date: installmentDate,
           installments,
           currentInstallment: i + 1,
@@ -220,12 +258,47 @@ export class CreditCardTransactionsService {
   }
 
   async removeAllInstallments(userId: string, installmentGroupId: string) {
+    // Find all installments before deleting to get their dates and credit card info
+    const installments = await this.creditCardTransactionsRepo.findMany({
+      where: {
+        userId,
+        installmentGroupId,
+      },
+      select: {
+        date: true,
+        creditCardId: true,
+      },
+    });
+
+    if (installments.length === 0) {
+      return null;
+    }
+
+    const creditCardId = installments[0].creditCardId;
+    const transactionDates = installments.map((t) => t.date);
+
+    // Get the credit card to obtain the closing day
+    const creditCard = await this.creditCardsRepo.findFirst({
+      where: { id: creditCardId },
+    });
+
+    // Delete all installments
     await this.creditCardTransactionsRepo.deleteMany({
       where: {
         userId,
         installmentGroupId,
       },
     });
+
+    // Update the invoices for all affected months
+    if (creditCard) {
+      await this.invoiceService.updateInvoicesForTransactionDates(
+        userId,
+        creditCardId,
+        creditCard.closingDay,
+        transactionDates,
+      );
+    }
 
     return null;
   }

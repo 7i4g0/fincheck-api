@@ -4,6 +4,7 @@ import { CreditCardTransactionsRepository } from '@/shared/database/repositories
 import { CreateCreditCardDto } from '../dto/create-credit-card.dto';
 import { UpdateCreditCardDto } from '../dto/update-credit-card.dto';
 import { VerifyCreditCardOwnershipService } from './verify-credit-card-ownership.service';
+import { VerifyBankAccountOwnershipService } from '../../bank-accounts/services/verify-bank-account-ownership.service';
 
 @Injectable()
 export class CreditCardsService {
@@ -11,11 +12,19 @@ export class CreditCardsService {
     private readonly creditCardsRepo: CreditCardsRepository,
     private readonly creditCardTransactionsRepo: CreditCardTransactionsRepository,
     private readonly verifyCreditCardOwnership: VerifyCreditCardOwnershipService,
+    private readonly verifyBankAccountOwnership: VerifyBankAccountOwnershipService,
   ) {}
 
-  create(userId: string, createCreditCardDto: CreateCreditCardDto) {
+  async create(userId: string, createCreditCardDto: CreateCreditCardDto) {
     const { name, color, limit, closingDay, dueDay, defaultBankAccountId } =
       createCreditCardDto;
+
+    if (defaultBankAccountId) {
+      await this.verifyBankAccountOwnership.validate(
+        userId,
+        defaultBankAccountId,
+      );
+    }
 
     return this.creditCardsRepo.create({
       data: {
@@ -63,10 +72,14 @@ export class CreditCardsService {
     creditCardId: string,
     updateCreditCardDto: UpdateCreditCardDto,
   ) {
-    await this.verifyCreditCardOwnership.validate(userId, creditCardId);
-
     const { name, color, limit, closingDay, dueDay, defaultBankAccountId } =
       updateCreditCardDto;
+
+    await Promise.all([
+      this.verifyCreditCardOwnership.validate(userId, creditCardId),
+      defaultBankAccountId &&
+        this.verifyBankAccountOwnership.validate(userId, defaultBankAccountId),
+    ]);
 
     return this.creditCardsRepo.update({
       where: { id: creditCardId },
