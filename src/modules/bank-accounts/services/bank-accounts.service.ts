@@ -25,6 +25,9 @@ export class BankAccountsService {
   }
 
   async findAllByUserId(userId: string) {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
     const bankAccounts = await this.bankAccountsRepo.findMany({
       where: {
         userId,
@@ -34,13 +37,19 @@ export class BankAccountsService {
           select: {
             type: true,
             value: true,
+            date: true,
           },
         },
       },
     });
 
     return bankAccounts.map((bankAccount) => {
-      const totalTransactions = bankAccount.transactions.reduce(
+      // Only consider transactions with date <= today for current balance
+      const realizedTransactions = bankAccount.transactions.filter(
+        (transaction) => new Date(transaction.date) <= today,
+      );
+
+      const totalTransactions = realizedTransactions.reduce(
         (acc, transaction) =>
           acc +
           (transaction.type === 'INCOME'
