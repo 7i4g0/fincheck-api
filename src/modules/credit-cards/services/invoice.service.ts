@@ -35,6 +35,82 @@ export class InvoiceService {
   }
 
   /**
+   * Calculates the date range for an invoice period.
+   * Returns the closing date (end of period) and previous closing date (start of period).
+   */
+  calculateInvoiceDateRange(
+    invoiceMonth: number,
+    invoiceYear: number,
+    closingDay: number,
+  ): { closingDate: Date; previousClosingDate: Date } {
+    const closingDate = new Date(
+      invoiceYear,
+      invoiceMonth - 1,
+      closingDay,
+      23,
+      59,
+      59,
+    );
+    const previousClosingDate = new Date(
+      invoiceYear,
+      invoiceMonth - 2,
+      closingDay,
+      0,
+      0,
+      0,
+    );
+
+    return { closingDate, previousClosingDate };
+  }
+
+  /**
+   * Fetches all credit card transactions for a specific invoice period.
+   */
+  async getInvoiceTransactions(
+    userId: string,
+    creditCardId: string,
+    invoiceMonth: number,
+    invoiceYear: number,
+    closingDay: number,
+    includeCategory = false,
+  ) {
+    const { closingDate, previousClosingDate } = this.calculateInvoiceDateRange(
+      invoiceMonth,
+      invoiceYear,
+      closingDay,
+    );
+
+    const include = includeCategory
+      ? {
+          category: {
+            select: {
+              id: true,
+              name: true,
+              icon: true,
+            },
+          },
+        }
+      : undefined;
+
+    const transactions = await this.creditCardTransactionsRepo.findMany({
+      where: {
+        creditCardId,
+        userId,
+        date: {
+          gt: previousClosingDate,
+          lte: closingDate,
+        },
+      },
+      include,
+      orderBy: {
+        date: 'desc',
+      },
+    });
+
+    return { transactions, closingDate, previousClosingDate };
+  }
+
+  /**
    * Updates or creates the invoice transaction for a card in a specific month/year
    */
   async updateInvoiceTransaction(
@@ -53,35 +129,14 @@ export class InvoiceService {
       return null;
     }
 
-    // Calculate the invoice period
-    const closingDate = new Date(
+    // Get all transactions for this invoice using the shared method
+    const { transactions } = await this.getInvoiceTransactions(
+      userId,
+      creditCardId,
+      invoiceMonth,
       invoiceYear,
-      invoiceMonth - 1,
       creditCard.closingDay,
-      23,
-      59,
-      59,
     );
-    const previousClosingDate = new Date(
-      invoiceYear,
-      invoiceMonth - 2,
-      creditCard.closingDay,
-      0,
-      0,
-      0,
-    );
-
-    // Get all transactions for this invoice
-    const transactions = await this.creditCardTransactionsRepo.findMany({
-      where: {
-        creditCardId,
-        userId,
-        date: {
-          gt: previousClosingDate,
-          lte: closingDate,
-        },
-      },
-    });
 
     const total = transactions.reduce((acc, t) => acc + t.value, 0);
 

@@ -124,15 +124,6 @@ export class CreditCardsController {
     );
   }
 
-  @Delete('transactions/:transactionId')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  removeTransaction(
-    @ActiveUserId() userId: string,
-    @Param('transactionId', ParseUUIDPipe) transactionId: string,
-  ) {
-    return this.creditCardTransactionsService.remove(userId, transactionId);
-  }
-
   @Delete('transactions/installments/:installmentGroupId')
   @HttpCode(HttpStatus.NO_CONTENT)
   removeAllInstallments(
@@ -143,5 +134,14 @@ export class CreditCardsController {
       userId,
       installmentGroupId,
     );
+  }
+
+  @Delete('transactions/:transactionId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeTransaction(
+    @ActiveUserId() userId: string,
+    @Param('transactionId', ParseUUIDPipe) transactionId: string,
+  ) {
+    return this.creditCardTransactionsService.remove(userId, transactionId);
   }
 }

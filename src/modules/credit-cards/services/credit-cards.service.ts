@@ -1,18 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { CreditCardsRepository } from '@/shared/database/repositories/credit-cards.repositories';
-import { CreditCardTransactionsRepository } from '@/shared/database/repositories/credit-card-transactions.repositories';
 import { CreateCreditCardDto } from '../dto/create-credit-card.dto';
 import { UpdateCreditCardDto } from '../dto/update-credit-card.dto';
 import { VerifyCreditCardOwnershipService } from './verify-credit-card-ownership.service';
 import { VerifyBankAccountOwnershipService } from '../../bank-accounts/services/verify-bank-account-ownership.service';
+import { InvoiceService } from './invoice.service';
 
 @Injectable()
 export class CreditCardsService {
   constructor(
     private readonly creditCardsRepo: CreditCardsRepository,
-    private readonly creditCardTransactionsRepo: CreditCardTransactionsRepository,
     private readonly verifyCreditCardOwnership: VerifyCreditCardOwnershipService,
     private readonly verifyBankAccountOwnership: VerifyBankAccountOwnershipService,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   async create(userId: string, createCreditCardDto: CreateCreditCardDto) {
@@ -114,40 +114,16 @@ export class CreditCardsService {
       return null;
     }
 
-    // Calculate invoice period based on closing day
-    // Invoice closes on closingDay of the month and is due on dueDay
-    const closingDate = new Date(year, month - 1, card.closingDay, 23, 59, 59);
-    const previousClosingDate = new Date(
-      year,
-      month - 2,
-      card.closingDay,
-      0,
-      0,
-      0,
-    );
-
-    const transactions = await this.creditCardTransactionsRepo.findMany({
-      where: {
-        creditCardId,
+    // Use InvoiceService to get transactions and date range
+    const { transactions, closingDate } =
+      await this.invoiceService.getInvoiceTransactions(
         userId,
-        date: {
-          gt: previousClosingDate,
-          lte: closingDate,
-        },
-      },
-      include: {
-        category: {
-          select: {
-            id: true,
-            name: true,
-            icon: true,
-          },
-        },
-      },
-      orderBy: {
-        date: 'desc',
-      },
-    });
+        creditCardId,
+        month,
+        year,
+        card.closingDay,
+        true, // include category
+      );
 
     const total = transactions.reduce((acc, t) => acc + t.value, 0);
     const dueDate = new Date(year, month - 1, card.dueDay);
