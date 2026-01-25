@@ -25,4 +25,8 @@ export class TransactionsRepository {
   delete(deleteDto: Prisma.TransactionDeleteArgs) {
     return this.prismaService.transaction.delete(deleteDto);
   }
+
+  upsert(upsertDto: Prisma.TransactionUpsertArgs) {
+    return this.prismaService.transaction.upsert(upsertDto);
+  }
 }
