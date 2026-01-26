@@ -36,7 +36,12 @@ export class InvoiceService {
 
   /**
    * Calculates the date range for an invoice period.
-   * Returns the closing date (end of period) and previous closing date (start of period).
+   * Returns the closing date (end of period) and previous closing date (end of previous period).
+   *
+   * The range is: previousClosingDate < transaction.date <= closingDate
+   * Both dates are set to 23:59:59 so that:
+   * - closingDate includes all transactions up to end of closing day
+   * - previousClosingDate (with gt:) excludes transactions from the previous closing day
    */
   calculateInvoiceDateRange(
     invoiceMonth: number,
@@ -55,9 +60,9 @@ export class InvoiceService {
       invoiceYear,
       invoiceMonth - 2,
       closingDay,
-      0,
-      0,
-      0,
+      23,
+      59,
+      59,
     );
 
     return { closingDate, previousClosingDate };
