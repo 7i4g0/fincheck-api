@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CreditCardsRepository } from '@/shared/database/repositories/credit-cards.repositories';
+import { CreditCardsRepository } from '../../../shared/database/repositories/credit-cards.repositories';
 import { CreateCreditCardDto } from '../dto/create-credit-card.dto';
 import { UpdateCreditCardDto } from '../dto/update-credit-card.dto';
 import { VerifyCreditCardOwnershipService } from './verify-credit-card-ownership.service';

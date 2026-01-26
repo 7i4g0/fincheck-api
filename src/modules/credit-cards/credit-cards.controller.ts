@@ -12,7 +12,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { ActiveUserId } from '@/shared/decorators/ActiveUserId';
+import { ActiveUserId } from '../../shared/decorators/ActiveUserId';
 import { CreateCreditCardDto } from './dto/create-credit-card.dto';
 import { UpdateCreditCardDto } from './dto/update-credit-card.dto';
 import { CreateCreditCardTransactionDto } from './dto/create-credit-card-transaction.dto';

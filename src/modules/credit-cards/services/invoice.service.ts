@@ -1,6 +1,6 @@
-import { CreditCardTransactionsRepository } from '@/shared/database/repositories/credit-card-transactions.repositories';
-import { CreditCardsRepository } from '@/shared/database/repositories/credit-cards.repositories';
-import { TransactionsRepository } from '@/shared/database/repositories/transactions.repositories';
+import { CreditCardTransactionsRepository } from '../../../shared/database/repositories/credit-card-transactions.repositories';
+import { CreditCardsRepository } from '../../../shared/database/repositories/credit-cards.repositories';
+import { TransactionsRepository } from '../../../shared/database/repositories/transactions.repositories';
 import { Injectable } from '@nestjs/common';
 
 @Injectable()

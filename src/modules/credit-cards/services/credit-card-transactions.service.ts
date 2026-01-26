@@ -1,5 +1,5 @@
-import { CreditCardTransactionsRepository } from '@/shared/database/repositories/credit-card-transactions.repositories';
-import { CreditCardsRepository } from '@/shared/database/repositories/credit-cards.repositories';
+import { CreditCardTransactionsRepository } from '../../../shared/database/repositories/credit-card-transactions.repositories';
+import { CreditCardsRepository } from '../../../shared/database/repositories/credit-cards.repositories';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { CreateCreditCardTransactionDto } from '../dto/create-credit-card-transaction.dto';

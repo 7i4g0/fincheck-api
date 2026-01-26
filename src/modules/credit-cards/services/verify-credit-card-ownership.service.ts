@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { CreditCardsRepository } from '@/shared/database/repositories/credit-cards.repositories';
+import { CreditCardsRepository } from '../../../shared/database/repositories/credit-cards.repositories';
 
 @Injectable()
 export class VerifyCreditCardOwnershipService {

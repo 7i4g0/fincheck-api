@@ -1,4 +1,4 @@
-import { TransactionType } from '@/modules/transactions/entities/Transaction';
+import { TransactionType } from '../../transactions/entities/Transaction';
 import { IsEnum, IsNotEmpty, IsString } from 'class-validator';
 
 export class CreateCategoryDto {
