@@ -21,9 +21,11 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  bankAccounts BankAccount[]
-  categories   Category[]
-  transactions Transaction[]
+  bankAccounts           BankAccount[]
+  categories             Category[]
+  transactions           Transaction[]
+  creditCards            CreditCard[]
+  creditCardTransactions CreditCardTransaction[]
 
   @@map("users")
 }
@@ -48,6 +50,7 @@ model BankAccount {
 
   users        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
+  creditCards  CreditCard[]  @relation("DefaultBankAccount")
 
   @@map("bank_accounts")
 }
@@ -69,8 +72,9 @@ model Category {
   createdAt DateTime        @default(now()) @map("created_at")
   updatedAt DateTime        @updatedAt @map("updated_at")
 
-  users        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  users                  User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions           Transaction[]
+  creditCardTransactions CreditCardTransaction[]
 
   @@map("categories")
 }
@@ -80,6 +84,9 @@ model Transaction {
   userId        String          @map("user_id") @db.Uuid
   bankAccountId String          @map("bank_account_id") @db.Uuid
   categoryId    String?         @map("category_id") @db.Uuid
+  creditCardId  String?         @map("credit_card_id") @db.Uuid // If it is an invoice for a credit card
+  invoiceMonth  Int?            @map("invoice_month") // Invoice month (1-12)
+  invoiceYear   Int?            @map("invoice_year") // Invoice year
   name          String
   value         Float
   date          DateTime
@@ -90,6 +97,49 @@ model Transaction {
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
   category    Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  creditCard  CreditCard? @relation("InvoiceTransactions", fields: [creditCardId], references: [id], onDelete: SetNull)
 
+  @@unique([creditCardId, invoiceMonth, invoiceYear]) // An invoice transaction by card/month/year
   @@map("transactions")
+}
+
+model CreditCard {
+  id                   String   @id @default(uuid()) @db.Uuid
+  userId               String   @map("user_id") @db.Uuid
+  defaultBankAccountId String?  @map("default_bank_account_id") @db.Uuid
+  name                 String
+  color                String
+  limit                Float    @default(0)
+  closingDay           Int      @map("closing_day") // Closing day (1-28)
+  dueDay               Int      @map("due_day") // Due day (1-28)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user                User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultBankAccount  BankAccount?            @relation("DefaultBankAccount", fields: [defaultBankAccountId], references: [id], onDelete: SetNull)
+  transactions        CreditCardTransaction[]
+  invoiceTransactions Transaction[]           @relation("InvoiceTransactions")
+
+  @@map("credit_cards")
+}
+
+model CreditCardTransaction {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  creditCardId       String   @map("credit_card_id") @db.Uuid
+  categoryId         String?  @map("category_id") @db.Uuid
+  name               String
+  value              Float
+  date               DateTime // Purchase date
+  installments       Int      @default(1) // Total installments
+  currentInstallment Int      @default(1) @map("current_installment") // Current installment
+  installmentGroupId String?  @map("installment_group_id") @db.Uuid // Group installments of the same purchase
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditCard CreditCard @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+  category   Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@map("credit_card_transactions")
 }
