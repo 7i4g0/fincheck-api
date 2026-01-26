@@ -35,6 +35,40 @@ export class InvoiceService {
   }
 
   /**
+   * Calculates the due date for an invoice.
+   * When dueDay is less than or equal to closingDay, the due date is in the same month.
+   * When dueDay is greater than closingDay, the due date is in the following month.
+   *
+   * Example: closingDay=25, dueDay=10
+   * - Invoice closes on Jan 25
+   * - Due date is Feb 10 (next month, since 10 < 25)
+   *
+   * Example: closingDay=10, dueDay=25
+   * - Invoice closes on Jan 10
+   * - Due date is Jan 25 (same month, since 25 > 10)
+   */
+  calculateDueDate(
+    invoiceMonth: number,
+    invoiceYear: number,
+    closingDay: number,
+    dueDay: number,
+  ): Date {
+    let dueMonth = invoiceMonth;
+    let dueYear = invoiceYear;
+
+    // If dueDay is before or equal to closingDay, the due date is in the next month
+    if (dueDay <= closingDay) {
+      dueMonth++;
+      if (dueMonth > 12) {
+        dueMonth = 1;
+        dueYear++;
+      }
+    }
+
+    return new Date(dueYear, dueMonth - 1, dueDay);
+  }
+
+  /**
    * Calculates the date range for an invoice period.
    * Returns the closing date (end of period) and previous closing date (end of previous period).
    *
@@ -146,7 +180,12 @@ export class InvoiceService {
     const total = transactions.reduce((acc, t) => acc + t.value, 0);
 
     // Due date of the invoice
-    const dueDate = new Date(invoiceYear, invoiceMonth - 1, creditCard.dueDay);
+    const dueDate = this.calculateDueDate(
+      invoiceMonth,
+      invoiceYear,
+      creditCard.closingDay,
+      creditCard.dueDay,
+    );
 
     if (total === 0) {
       // If the total is zero, try to delete the invoice transaction if it exists

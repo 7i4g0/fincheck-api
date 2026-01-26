@@ -126,7 +126,12 @@ export class CreditCardsService {
       );
 
     const total = transactions.reduce((acc, t) => acc + t.value, 0);
-    const dueDate = new Date(year, month - 1, card.dueDay);
+    const dueDate = this.invoiceService.calculateDueDate(
+      month,
+      year,
+      card.closingDay,
+      card.dueDay,
+    );
 
     return {
       creditCard: card,
