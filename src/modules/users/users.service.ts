@@ -20,7 +20,17 @@ export class UsersService {
         name: true,
         email: true,
         createdAt: true,
+        onboardingCompleted: true,
       },
     });
+  }
+
+  async completeOnboarding(userId: string) {
+    await this.usersRepo.update({
+      where: { id: userId },
+      data: { onboardingCompleted: true },
+    });
+
+    return { message: 'Onboarding completed' };
   }
 }
