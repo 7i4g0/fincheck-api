@@ -29,6 +29,9 @@ export class CategoriesService {
       where: {
         userId,
       },
+      orderBy: {
+        name: 'asc',
+      },
     });
   }
 
