@@ -3,10 +3,10 @@ import {
   IsEnum,
   IsNotEmpty,
   IsNumber,
-  IsOptional,
   IsPositive,
   IsString,
   IsUUID,
+  ValidateIf,
 } from 'class-validator';
 import { TransactionType } from '../entities/Transaction';
 
@@ -16,10 +16,19 @@ export class CreateTransactionDto {
   @IsUUID()
   bankAccountId: string;
 
+  @ValidateIf((o) => o.type === TransactionType.TRANSFER)
+  @IsString()
+  @IsNotEmpty({
+    message: 'A conta de destino é obrigatória para transferências',
+  })
+  @IsUUID()
+  destinationBankAccountId?: string;
+
+  @ValidateIf((o) => o.type !== TransactionType.TRANSFER)
   @IsString()
   @IsNotEmpty()
   @IsUUID()
-  categoryId: string;
+  categoryId?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'O nome da transação é obrigatório' })
@@ -34,7 +43,7 @@ export class CreateTransactionDto {
   @IsDateString()
   date: Date;
 
-  @IsOptional()
+  @IsNotEmpty()
   @IsEnum(TransactionType)
   type: TransactionType;
 }

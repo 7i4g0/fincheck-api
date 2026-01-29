@@ -49,9 +49,10 @@ model BankAccount {
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
 
-  users        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
-  creditCards  CreditCard[]  @relation("DefaultBankAccount")
+  users                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceTransactions      Transaction[] @relation("SourceTransactions")
+  destinationTransactions Transaction[] @relation("DestinationTransactions")
+  creditCards             CreditCard[]  @relation("DefaultBankAccount")
 
   @@map("bank_accounts")
 }
@@ -81,24 +82,26 @@ model Category {
 }
 
 model Transaction {
-  id            String          @id @default(uuid()) @db.Uuid
-  userId        String          @map("user_id") @db.Uuid
-  bankAccountId String          @map("bank_account_id") @db.Uuid
-  categoryId    String?         @map("category_id") @db.Uuid
-  creditCardId  String?         @map("credit_card_id") @db.Uuid // If it is an invoice for a credit card
-  invoiceMonth  Int?            @map("invoice_month") // Invoice month (1-12)
-  invoiceYear   Int?            @map("invoice_year") // Invoice year
-  name          String
-  value         Float
-  date          DateTime
-  type          TransactionType
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
+  id                       String          @id @default(uuid()) @db.Uuid
+  userId                   String          @map("user_id") @db.Uuid
+  bankAccountId            String          @map("bank_account_id") @db.Uuid
+  destinationBankAccountId String?         @map("destination_bank_account_id") @db.Uuid // For TRANSFER type
+  categoryId               String?         @map("category_id") @db.Uuid
+  creditCardId             String?         @map("credit_card_id") @db.Uuid // If it is an invoice for a credit card
+  invoiceMonth             Int?            @map("invoice_month") // Invoice month (1-12)
+  invoiceYear              Int?            @map("invoice_year") // Invoice year
+  name                     String
+  value                    Float
+  date                     DateTime
+  type                     TransactionType
+  createdAt                DateTime        @default(now()) @map("created_at")
+  updatedAt                DateTime        @updatedAt @map("updated_at")
 
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
-  category    Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  creditCard  CreditCard? @relation("InvoiceTransactions", fields: [creditCardId], references: [id], onDelete: SetNull)
+  user                   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount            BankAccount  @relation("SourceTransactions", fields: [bankAccountId], references: [id], onDelete: Cascade)
+  destinationBankAccount BankAccount? @relation("DestinationTransactions", fields: [destinationBankAccountId], references: [id], onDelete: Cascade)
+  category               Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  creditCard             CreditCard?  @relation("InvoiceTransactions", fields: [creditCardId], references: [id], onDelete: SetNull)
 
   @@unique([creditCardId, invoiceMonth, invoiceYear]) // An invoice transaction by card/month/year
   @@map("transactions")

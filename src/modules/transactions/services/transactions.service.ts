@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { TransactionsRepository } from '../../../shared/database/repositories/transactions.repositories';
 import { VerifyBankAccountOwnershipService } from '../../bank-accounts/services/verify-bank-account-ownership.service';
 import { VerifyCategoryOwnershipService } from '../../categories/services/verify-category-ownership.service';
@@ -17,15 +17,48 @@ export class TransactionsService {
   ) {}
 
   async create(userId: string, createTransactionDto: CreateTransactionDto) {
-    const { bankAccountId, categoryId, date, type, value, name } =
-      createTransactionDto;
-    await this.validateEntitiesOwnership({ userId, bankAccountId, categoryId });
+    const {
+      bankAccountId,
+      destinationBankAccountId,
+      categoryId,
+      date,
+      type,
+      value,
+      name,
+    } = createTransactionDto;
+
+    // Especial validation for transfers
+    if (type === TransactionType.TRANSFER) {
+      if (!destinationBankAccountId) {
+        throw new BadRequestException(
+          'A conta de destino é obrigatória para transferências',
+        );
+      }
+      if (bankAccountId === destinationBankAccountId) {
+        throw new BadRequestException(
+          'A conta de origem e destino devem ser diferentes',
+        );
+      }
+      await this.validateEntitiesOwnership({
+        userId,
+        bankAccountId,
+        destinationBankAccountId,
+      });
+    } else {
+      await this.validateEntitiesOwnership({
+        userId,
+        bankAccountId,
+        categoryId,
+      });
+    }
 
     return this.transactionsRepo.create({
       data: {
         userId,
         bankAccountId,
-        categoryId,
+        destinationBankAccountId:
+          type === TransactionType.TRANSFER ? destinationBankAccountId : null,
+        categoryId: type !== TransactionType.TRANSFER ? categoryId : null,
         date,
         type,
         value,
@@ -46,7 +79,12 @@ export class TransactionsService {
     return this.transactionsRepo.findMany({
       where: {
         userId,
-        bankAccountId: filters.bankAccountId,
+        OR: filters.bankAccountId
+          ? [
+              { bankAccountId: filters.bankAccountId },
+              { destinationBankAccountId: filters.bankAccountId },
+            ]
+          : undefined,
         type: filters.type,
         date: {
           gte: new Date(filters.year, filters.month - 1, 1),
@@ -61,6 +99,20 @@ export class TransactionsService {
             icon: true,
           },
         },
+        destinationBankAccount: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+          },
+        },
+        bankAccount: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+          },
+        },
       },
     });
   }
@@ -70,20 +122,50 @@ export class TransactionsService {
     transactionId: string,
     updateTransactionDto: UpdateTransactionDto,
   ) {
-    const { bankAccountId, categoryId, date, type, value, name } =
-      updateTransactionDto;
-    await this.validateEntitiesOwnership({
-      userId,
+    const {
       bankAccountId,
+      destinationBankAccountId,
       categoryId,
-      transactionId,
-    });
+      date,
+      type,
+      value,
+      name,
+    } = updateTransactionDto;
+
+    // Special validation for transfers
+    if (type === TransactionType.TRANSFER) {
+      if (!destinationBankAccountId) {
+        throw new BadRequestException(
+          'A conta de destino é obrigatória para transferências',
+        );
+      }
+      if (bankAccountId === destinationBankAccountId) {
+        throw new BadRequestException(
+          'A conta de origem e destino devem ser diferentes',
+        );
+      }
+      await this.validateEntitiesOwnership({
+        userId,
+        bankAccountId,
+        destinationBankAccountId,
+        transactionId,
+      });
+    } else {
+      await this.validateEntitiesOwnership({
+        userId,
+        bankAccountId,
+        categoryId,
+        transactionId,
+      });
+    }
 
     return this.transactionsRepo.update({
       where: { id: transactionId },
       data: {
         bankAccountId,
-        categoryId,
+        destinationBankAccountId:
+          type === TransactionType.TRANSFER ? destinationBankAccountId : null,
+        categoryId: type !== TransactionType.TRANSFER ? categoryId : null,
         date,
         type,
         value,
@@ -105,11 +187,13 @@ export class TransactionsService {
   private async validateEntitiesOwnership({
     userId,
     bankAccountId,
+    destinationBankAccountId,
     categoryId,
     transactionId,
   }: {
     userId: string;
     bankAccountId?: string;
+    destinationBankAccountId?: string;
     categoryId?: string;
     transactionId?: string;
   }) {
@@ -118,6 +202,11 @@ export class TransactionsService {
         this.verifyTransactionOwnershipService.validate(userId, transactionId),
       bankAccountId &&
         this.verifyBankAccountOwnershipService.validate(userId, bankAccountId),
+      destinationBankAccountId &&
+        this.verifyBankAccountOwnershipService.validate(
+          userId,
+          destinationBankAccountId,
+        ),
       categoryId &&
         this.verifyCategoryOwnershipService.validate(userId, categoryId),
     ]);

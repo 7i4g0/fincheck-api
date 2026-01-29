@@ -33,7 +33,14 @@ export class BankAccountsService {
         userId,
       },
       include: {
-        transactions: {
+        sourceTransactions: {
+          select: {
+            type: true,
+            value: true,
+            date: true,
+          },
+        },
+        destinationTransactions: {
           select: {
             type: true,
             value: true,
@@ -45,19 +52,44 @@ export class BankAccountsService {
 
     return bankAccounts.map((bankAccount) => {
       // Only consider transactions with date <= today for current balance
-      const realizedTransactions = bankAccount.transactions.filter(
+      const realizedSourceTransactions = bankAccount.sourceTransactions.filter(
         (transaction) => new Date(transaction.date) <= today,
       );
 
-      const totalTransactions = realizedTransactions.reduce(
-        (acc, transaction) =>
-          acc +
-          (transaction.type === 'INCOME'
-            ? transaction.value
-            : -transaction.value),
+      const realizedDestinationTransactions =
+        bankAccount.destinationTransactions.filter(
+          (transaction) => new Date(transaction.date) <= today,
+        );
+
+      // Calculate balance from source transactions (this account is the origin)
+      const sourceBalance = realizedSourceTransactions.reduce(
+        (acc, transaction) => {
+          if (transaction.type === 'INCOME') {
+            return acc + transaction.value;
+          } else if (transaction.type === 'EXPENSE') {
+            return acc - transaction.value;
+          } else if (transaction.type === 'TRANSFER') {
+            // Money leaving this account
+            return acc - transaction.value;
+          }
+          return acc;
+        },
         0,
       );
 
+      // Calculate balance from destination transactions (this account receives transfers)
+      const destinationBalance = realizedDestinationTransactions.reduce(
+        (acc, transaction) => {
+          // Only TRANSFER type has destination account
+          if (transaction.type === 'TRANSFER') {
+            return acc + transaction.value;
+          }
+          return acc;
+        },
+        0,
+      );
+
+      const totalTransactions = sourceBalance + destinationBalance;
       const currentBalance = bankAccount.initialBalance + totalTransactions;
 
       return {
