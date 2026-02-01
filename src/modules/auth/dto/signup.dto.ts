@@ -13,4 +13,8 @@ export class SignupDto {
   @IsNotEmpty()
   @MinLength(8)
   password: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'O token do reCAPTCHA é obrigatório' })
+  recaptchaToken: string;
 }

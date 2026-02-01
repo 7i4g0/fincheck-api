@@ -9,12 +9,14 @@ import { compare, hash } from 'bcryptjs';
 import { UsersRepository } from '../../shared/database/repositories/users.repositories';
 import { SigninDto } from './dto/signin.dto';
 import { SignupDto } from './dto/signup.dto';
+import { RecaptchaService } from './services/recaptcha.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersRepo: UsersRepository,
     private readonly jwtService: JwtService,
+    private readonly recaptchaService: RecaptchaService,
   ) {}
 
   async signin(signinDto: SigninDto) {
@@ -40,19 +42,23 @@ export class AuthService {
   }
 
   async signup(signupDto: SignupDto) {
+    const { recaptchaToken, ...userData } = signupDto;
+
+    await this.recaptchaService.validate(recaptchaToken);
+
     const userExists = await this.usersRepo.findUnique({
-      where: { email: signupDto.email },
+      where: { email: userData.email },
     });
 
     if (userExists) {
       throw new ConflictException('Este email já está sendo utilizado');
     }
 
-    const hashedPassword = await hash(signupDto.password, 10);
+    const hashedPassword = await hash(userData.password, 10);
 
     const user = await this.usersRepo.create({
       data: {
-        ...signupDto,
+        ...userData,
         password: hashedPassword,
         categories: {
           create: [

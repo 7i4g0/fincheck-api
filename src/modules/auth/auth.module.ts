@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { env } from '../../shared/config/env';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { RecaptchaService } from './services/recaptcha.service';
 
 @Module({
   imports: [
@@ -13,6 +14,6 @@ import { AuthService } from './auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, RecaptchaService],
 })
 export class AuthModule {}
