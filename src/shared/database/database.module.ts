@@ -4,6 +4,7 @@ import { BankAccountsRepository } from './repositories/bank-accounts.repositorie
 import { CategoriesRepository } from './repositories/categories.repositories';
 import { CreditCardTransactionsRepository } from './repositories/credit-card-transactions.repositories';
 import { CreditCardsRepository } from './repositories/credit-cards.repositories';
+import { PasswordResetTokensRepository } from './repositories/password-reset-tokens.repositories';
 import { TransactionsRepository } from './repositories/transactions.repositories';
 import { UsersRepository } from './repositories/users.repositories';
 
@@ -17,6 +18,7 @@ import { UsersRepository } from './repositories/users.repositories';
     TransactionsRepository,
     CreditCardsRepository,
     CreditCardTransactionsRepository,
+    PasswordResetTokensRepository,
   ],
   exports: [
     PrismaService,
@@ -26,6 +28,7 @@ import { UsersRepository } from './repositories/users.repositories';
     TransactionsRepository,
     CreditCardsRepository,
     CreditCardTransactionsRepository,
+    PasswordResetTokensRepository,
   ],
 })
 export class DatabaseModule {}
