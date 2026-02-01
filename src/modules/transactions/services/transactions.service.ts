@@ -87,8 +87,10 @@ export class TransactionsService {
           : undefined,
         type: filters.type,
         date: {
-          gte: new Date(filters.year, filters.month - 1, 1),
-          lte: new Date(filters.year, filters.month, 0),
+          gte: new Date(
+            Date.UTC(filters.year, filters.month - 1, 1, 0, 0, 0, 0),
+          ),
+          lt: new Date(Date.UTC(filters.year, filters.month, 1, 0, 0, 0, 0)),
         },
       },
       include: {
@@ -113,6 +115,16 @@ export class TransactionsService {
             color: true,
           },
         },
+        creditCard: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+          },
+        },
+      },
+      orderBy: {
+        date: 'desc',
       },
     });
   }

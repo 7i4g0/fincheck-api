@@ -12,7 +12,7 @@ export class CategoriesService {
   ) {}
 
   async create(userId: string, createCategoryDto: CreateCategoryDto) {
-    const { name, icon, type } = createCategoryDto;
+    const { name, icon, type, estimatedValue } = createCategoryDto;
 
     return this.categoriesRepo.create({
       data: {
@@ -20,6 +20,7 @@ export class CategoriesService {
         name,
         icon,
         type,
+        estimatedValue,
       },
     });
   }
@@ -42,7 +43,7 @@ export class CategoriesService {
   ) {
     await this.verifyCategoryOwnership.validate(userId, categoryId);
 
-    const { name, icon, type } = updateCategoryDto;
+    const { name, icon, type, estimatedValue } = updateCategoryDto;
     return this.categoriesRepo.update({
       where: {
         id: categoryId,
@@ -52,6 +53,7 @@ export class CategoriesService {
         icon,
         name,
         type,
+        estimatedValue,
       },
     });
   }

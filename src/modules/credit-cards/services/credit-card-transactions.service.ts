@@ -152,11 +152,16 @@ export class CreditCardTransactionsService {
     };
 
     if (filters?.month && filters?.year) {
-      const startDate = new Date(filters.year, filters.month - 1, 1);
-      const endDate = new Date(filters.year, filters.month, 0, 23, 59, 59);
+      // Usar UTC para evitar problemas de fuso horário
+      const startDate = new Date(
+        Date.UTC(filters.year, filters.month - 1, 1, 0, 0, 0, 0),
+      );
+      const endDate = new Date(
+        Date.UTC(filters.year, filters.month, 1, 0, 0, 0, 0),
+      );
       where.date = {
         gte: startDate,
-        lte: endDate,
+        lt: endDate,
       };
     }
 
