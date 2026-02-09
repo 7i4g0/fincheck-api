@@ -134,6 +134,8 @@ export class TransactionsService {
     transactionId: string,
     updateTransactionDto: UpdateTransactionDto,
   ) {
+    await this.ensureNotInvoiceTransaction(transactionId);
+
     const {
       bankAccountId,
       destinationBankAccountId,
@@ -188,12 +190,29 @@ export class TransactionsService {
 
   async remove(userId: string, transactionId: string) {
     await this.validateEntitiesOwnership({ userId, transactionId });
+    await this.ensureNotInvoiceTransaction(transactionId);
 
     await this.transactionsRepo.delete({
       where: { id: transactionId },
     });
 
     return null;
+  }
+
+  private async ensureNotInvoiceTransaction(transactionId: string) {
+    const transaction = await this.transactionsRepo.findFirst({
+      where: { id: transactionId },
+      select: { creditCardId: true, invoiceMonth: true, invoiceYear: true },
+    });
+    if (
+      transaction?.creditCardId != null &&
+      transaction?.invoiceMonth != null &&
+      transaction?.invoiceYear != null
+    ) {
+      throw new BadRequestException(
+        'Transação de fatura é gerada automaticamente e não pode ser editada nem excluída.',
+      );
+    }
   }
 
   private async validateEntitiesOwnership({
