@@ -26,7 +26,7 @@ export class EmailService {
     userName?: string,
   ) {
     const frontendUrl = process.env.FRONTEND_URL || 'https://granaemordem.app';
-    const resetLink = `${frontendUrl}/reset-password?token=${token}`;
+    const resetLink = `${frontendUrl}/redefinir-senha?token=${token}`;
 
     try {
       const { data, error } = await this.resend.emails.send({
