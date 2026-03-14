@@ -1,4 +1,12 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsNotEmpty,
+  IsString,
+  MinLength,
+} from 'class-validator';
+
+export const PRIVACY_POLICY_VERSION = '1.0';
 
 export class SignupDto {
   @IsString()
@@ -13,6 +21,10 @@ export class SignupDto {
   @IsNotEmpty()
   @MinLength(8)
   password: string;
+
+  @IsBoolean({ message: 'É necessário aceitar a Política de Privacidade' })
+  @IsNotEmpty({ message: 'É necessário aceitar a Política de Privacidade' })
+  acceptPrivacy: boolean;
 
   @IsString()
   @IsNotEmpty({ message: 'O token do reCAPTCHA é obrigatório' })

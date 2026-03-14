@@ -14,13 +14,15 @@ datasource db {
 }
 
 model User {
-  id                  String   @id @default(uuid()) @db.Uuid
-  email               String   @unique
-  name                String?
-  password            String
-  onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  id                        String    @id @default(uuid()) @db.Uuid
+  email                     String    @unique
+  name                      String?
+  password                  String
+  onboardingCompleted       Boolean   @default(false) @map("onboarding_completed")
+  privacyPolicyAcceptedAt   DateTime? @map("privacy_policy_accepted_at")
+  privacyPolicyVersion      String?   @map("privacy_policy_version")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
 
   bankAccounts           BankAccount[]
   categories             Category[]
