@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   UnauthorizedException,
@@ -8,7 +9,7 @@ import { User } from '@prisma/client';
 import { compare, hash } from 'bcryptjs';
 import { UsersRepository } from '../../shared/database/repositories/users.repositories';
 import { SigninDto } from './dto/signin.dto';
-import { SignupDto } from './dto/signup.dto';
+import { PRIVACY_POLICY_VERSION, SignupDto } from './dto/signup.dto';
 import { RecaptchaService } from './services/recaptcha.service';
 
 @Injectable()
@@ -42,7 +43,13 @@ export class AuthService {
   }
 
   async signup(signupDto: SignupDto) {
-    const { recaptchaToken, ...userData } = signupDto;
+    const { recaptchaToken, acceptPrivacy, ...userData } = signupDto;
+
+    if (acceptPrivacy !== true) {
+      throw new BadRequestException(
+        'É necessário aceitar a Política de Privacidade',
+      );
+    }
 
     await this.recaptchaService.validate(recaptchaToken);
 
@@ -60,6 +67,8 @@ export class AuthService {
       data: {
         ...userData,
         password: hashedPassword,
+        privacyPolicyAcceptedAt: new Date(),
+        privacyPolicyVersion: PRIVACY_POLICY_VERSION,
         categories: {
           create: [
             // Income

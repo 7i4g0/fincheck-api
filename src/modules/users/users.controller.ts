@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -16,14 +17,20 @@ import { UsersService } from './users.service';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Get()
-  findAll() {
-    return this.usersService.findAll();
-  }
-
   @Get('/me')
   me(@ActiveUserId() userId: string) {
     return this.usersService.getUserById(userId);
+  }
+
+  @Get('/me/export')
+  exportData(@ActiveUserId() userId: string) {
+    return this.usersService.exportData(userId);
+  }
+
+  @Delete('/me')
+  @HttpCode(HttpStatus.OK)
+  deleteAccount(@ActiveUserId() userId: string) {
+    return this.usersService.deleteAccount(userId);
   }
 
   @Put('/me')

@@ -8,14 +8,6 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 export class UsersService {
   constructor(private readonly usersRepo: UsersRepository) {}
 
-  findAll() {
-    return `This action returns all users`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} user`;
-  }
-
   getUserById(userId: string) {
     return this.usersRepo.findUnique({
       where: { id: userId },
@@ -74,5 +66,59 @@ export class UsersService {
     });
 
     return { message: 'Onboarding completed' };
+  }
+
+  async deleteAccount(userId: string) {
+    await this.usersRepo.delete({
+      where: { id: userId },
+    });
+    return { message: 'Conta excluída com sucesso' };
+  }
+
+  async exportData(userId: string) {
+    const user = await this.usersRepo.findUniqueForExport(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+
+    const {
+      bankAccounts,
+      categories,
+      creditCards,
+      transactions,
+      creditCardTransactions,
+      ...profile
+    } = user;
+
+    return {
+      exportedAt: new Date().toISOString(),
+      profile: {
+        name: profile.name,
+        email: profile.email,
+        createdAt: profile.createdAt,
+      },
+      accounts: bankAccounts,
+      categories,
+      creditCards,
+      transactions: transactions.map((t) => ({
+        name: t.name,
+        value: t.value,
+        date: t.date,
+        type: t.type,
+        account: t.bankAccount?.name ?? null,
+        destinationAccount: t.destinationBankAccount?.name ?? null,
+        category: t.category?.name ?? null,
+      })),
+      creditCardTransactions: creditCardTransactions.map((t) => ({
+        name: t.name,
+        value: t.value,
+        date: t.date,
+        installments: t.installments,
+        currentInstallment: t.currentInstallment,
+        card: t.creditCard?.name ?? null,
+        category: t.category?.name ?? null,
+      })),
+    };
   }
 }

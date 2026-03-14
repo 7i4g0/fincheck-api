@@ -41,7 +41,7 @@ export class EmailService {
         throw error;
       }
 
-      this.logger.log(`Email de recuperação enviado para ${email}`);
+      this.logger.log('Email de recuperação de senha enviado com sucesso');
       return data;
     } catch (error) {
       this.logger.error('Falha ao enviar email de recuperação:', error);
