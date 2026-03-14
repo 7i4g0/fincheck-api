@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { env } from '../../shared/config/env';
 import { IS_PUBLIC_KEY } from '../../shared/decorators/IsPublic';
+import { ACCESS_TOKEN_COOKIE } from './auth.constants';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -29,7 +30,9 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
 
-    const token = this.extractTokenFromHeader(request);
+    const token =
+      this.extractTokenFromCookie(request) ??
+      this.extractTokenFromHeader(request);
 
     if (!token) {
       throw new UnauthorizedException('Missing access token');
@@ -46,6 +49,10 @@ export class AuthGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  private extractTokenFromCookie(request: Request): string | undefined {
+    return request.cookies?.[ACCESS_TOKEN_COOKIE];
   }
 
   private extractTokenFromHeader(request: Request): string | undefined {

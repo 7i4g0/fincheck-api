@@ -1,51 +1,56 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
+import cookieParser from 'cookie-parser';
 import 'dotenv/config';
 import express from 'express';
 import { AppModule } from './app.module';
 
-// Criando a instância do express corretamente
+const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+// Creating the express instance correctly
 const expressApp = express();
 
 async function bootstrap() {
   try {
-    console.log('Iniciando aplicação...');
+    console.log('Starting application...');
     const app = await NestFactory.create(
       AppModule,
       new ExpressAdapter(expressApp),
     );
-    console.log('App criado com sucesso');
+    console.log('App created successfully');
 
+    app.use(cookieParser());
     app.useGlobalPipes(new ValidationPipe());
     app.enableCors({
-      origin: '*',
+      origin: FRONTEND_ORIGIN,
+      credentials: true,
     });
 
-    console.log('Configurações aplicadas');
+    console.log('Configurations applied');
 
-    // Se não estiver em produção, inicia o servidor HTTP
+    // If not in production, start the HTTP server
     if (process.env.NODE_ENV !== 'production') {
       await app.listen(process.env.PORT || 3001);
-      console.log('Aplicação rodando na porta:', process.env.PORT || 3001);
+      console.log('Application running on port:', process.env.PORT || 3001);
     } else {
       await app.init();
-      console.log('Aplicação inicializada em modo serverless');
+      console.log('Application initialized in serverless mode');
     }
 
     return app;
   } catch (error) {
-    console.error('Erro ao iniciar aplicação:', error);
+    console.error('Error starting application:', error);
     throw error;
   }
 }
 
-// Para desenvolvimento local
+// For local development
 if (process.env.NODE_ENV !== 'production') {
   bootstrap();
 }
 
-// Para Vercel
+// For Vercel
 export default async function handler(req: any, res: any) {
   const app = await bootstrap();
   const instance = app.getHttpAdapter().getInstance();
