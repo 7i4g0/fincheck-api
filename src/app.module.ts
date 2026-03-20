@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { AiAdvisorModule } from './modules/ai-advisor/ai-advisor.module';
 import { AuthGuard } from './modules/auth/auth.guard';
 import { AuthModule } from './modules/auth/auth.module';
 import { BankAccountsModule } from './modules/bank-accounts/bank-accounts.module';
@@ -18,6 +19,7 @@ import { DatabaseModule } from './shared/database/database.module';
     BankAccountsModule,
     TransactionsModule,
     CreditCardsModule,
+    AiAdvisorModule,
   ],
   controllers: [],
   providers: [
