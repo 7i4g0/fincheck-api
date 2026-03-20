@@ -227,37 +227,132 @@ export class FinancialContextService {
   }
 
   async getMonthlyTrend(userId: string, months = 3) {
-    const results: { month: number; year: number; income: number; expense: number }[] = [];
     const now = new Date();
 
-    for (let i = months - 1; i >= 0; i--) {
-      const date = new Date(Date.UTC(now.getFullYear(), now.getMonth() - i, 1));
-      const month = date.getUTCMonth() + 1;
-      const year = date.getUTCFullYear();
+    const periods = Array.from({ length: months }, (_, i) => {
+      const date = new Date(Date.UTC(now.getFullYear(), now.getMonth() - (months - 1 - i), 1));
+      return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };
+    });
 
-      const transactions = await this.transactionsRepo.findMany({
-        where: {
-          userId,
-          date: {
-            gte: new Date(Date.UTC(year, month - 1, 1)),
-            lt: new Date(Date.UTC(year, month, 1)),
+    const results = await Promise.all(
+      periods.map(async ({ month, year }) => {
+        const transactions = await this.transactionsRepo.findMany({
+          where: {
+            userId,
+            date: {
+              gte: new Date(Date.UTC(year, month - 1, 1)),
+              lt: new Date(Date.UTC(year, month, 1)),
+            },
+            type: { in: ['INCOME', 'EXPENSE'] },
           },
-          type: { in: ['INCOME', 'EXPENSE'] },
-        },
-        select: { value: true, type: true },
-      });
+          select: { value: true, type: true },
+        });
 
-      const income = transactions
-        .filter((t) => t.type === 'INCOME')
-        .reduce((sum, t) => sum + t.value, 0);
-      const expense = transactions
-        .filter((t) => t.type === 'EXPENSE')
-        .reduce((sum, t) => sum + t.value, 0);
+        const income = transactions
+          .filter((t) => t.type === 'INCOME')
+          .reduce((sum, t) => sum + t.value, 0);
+        const expense = transactions
+          .filter((t) => t.type === 'EXPENSE')
+          .reduce((sum, t) => sum + t.value, 0);
 
-      results.push({ month, year, income, expense });
-    }
+        return { month, year, income, expense };
+      }),
+    );
 
     return results;
+  }
+
+  async buildContext(userId: string, month: number, year: number): Promise<string> {
+    const brl = (v: number) =>
+      v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    const monthName = new Date(Date.UTC(year, month - 1, 1))
+      .toLocaleString('pt-BR', { month: 'long', timeZone: 'UTC' });
+
+    const [accounts, creditCards, transactions, ccTransactions, categoryBreakdown, trend] =
+      await Promise.all([
+        this.getBankAccounts(userId),
+        this.getCreditCards(userId),
+        this.getTransactions(userId, month, year),
+        this.getCreditCardTransactions(userId, month, year),
+        this.getCategoryBreakdown(userId, month, year),
+        this.getMonthlyTrend(userId, 3),
+      ]);
+
+    const totalIncome = transactions
+      .filter((t) => t.type === 'INCOME')
+      .reduce((s, t) => s + t.value, 0);
+    const totalExpense = transactions
+      .filter((t) => t.type === 'EXPENSE')
+      .reduce((s, t) => s + t.value, 0);
+    const totalCcExpense = ccTransactions.reduce((s, t) => s + t.value, 0);
+
+    const lines: string[] = [
+      `=== CONTEXTO FINANCEIRO — ${monthName.toUpperCase()} ${year} ===`,
+      '',
+      '--- CONTAS BANCÁRIAS ---',
+    ];
+
+    if (accounts.length === 0) {
+      lines.push('Nenhuma conta cadastrada.');
+    } else {
+      for (const a of accounts) {
+        lines.push(`${a.name} (${a.type}): saldo atual ${brl(a.currentBalance)}`);
+      }
+      const totalBalance = accounts.reduce((s, a) => s + a.currentBalance, 0);
+      lines.push(`Total em contas: ${brl(totalBalance)}`);
+    }
+
+    lines.push('', '--- CARTÕES DE CRÉDITO ---');
+    if (creditCards.length === 0) {
+      lines.push('Nenhum cartão cadastrado.');
+    } else {
+      for (const c of creditCards) {
+        lines.push(
+          `${c.name}: limite ${brl(c.limit)} | fatura atual ${brl(c.currentInvoiceTotal)} | disponível ${brl(c.availableLimit)} | fecha dia ${c.closingDay} | vence dia ${c.dueDay}`,
+        );
+      }
+    }
+
+    lines.push('', `--- TRANSAÇÕES DE CONTAS — ${monthName}/${year} ---`);
+    lines.push(`Receitas: ${brl(totalIncome)} | Despesas: ${brl(totalExpense)} | Saldo do mês: ${brl(totalIncome - totalExpense)}`);
+    if (transactions.length > 0) {
+      for (const t of transactions) {
+        const cat = t.category ? ` [${t.category}]` : '';
+        lines.push(`  ${t.type === 'INCOME' ? '+' : '-'} ${brl(t.value)} — ${t.name}${cat}`);
+      }
+    }
+
+    lines.push('', `--- COMPRAS NO CARTÃO DE CRÉDITO — ${monthName}/${year} ---`);
+    lines.push(`Total: ${brl(totalCcExpense)}`);
+    if (ccTransactions.length > 0) {
+      for (const t of ccTransactions) {
+        const cat = t.category ? ` [${t.category}]` : '';
+        const inst = t.installments > 1 ? ` (${t.currentInstallment}/${t.installments}x)` : '';
+        lines.push(`  - ${brl(t.value)} — ${t.name}${cat}${inst} (${t.creditCard})`);
+      }
+    } else {
+      lines.push('Nenhuma compra no cartão neste mês.');
+    }
+
+    lines.push('', '--- GASTOS POR CATEGORIA ---');
+    if (categoryBreakdown.length > 0) {
+      for (const c of categoryBreakdown) {
+        lines.push(`  ${c.category}: ${brl(c.total)}`);
+      }
+    } else {
+      lines.push('Sem dados.');
+    }
+
+    lines.push('', '--- HISTÓRICO MENSAL (últimos 3 meses) ---');
+    for (const t of trend) {
+      const mn = new Date(Date.UTC(t.year, t.month - 1, 1))
+        .toLocaleString('pt-BR', { month: 'long', timeZone: 'UTC' });
+      lines.push(`${mn}/${t.year}: receitas ${brl(t.income)} | despesas ${brl(t.expense)} | saldo ${brl(t.income - t.expense)}`);
+    }
+
+    lines.push('', '=== FIM DO CONTEXTO ===');
+    return lines.join('\n');
   }
 
   async getCategoryBreakdown(userId: string, month: number, year: number) {
