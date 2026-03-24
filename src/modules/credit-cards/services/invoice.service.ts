@@ -22,8 +22,8 @@ export class InvoiceService {
     let month = transactionDate.getMonth() + 1;
     let year = transactionDate.getFullYear();
 
-    // If the transaction is after the closing day, it goes to the next invoice
-    if (txDay > closingDay) {
+    // If the transaction is on or after the closing day, it goes to the next invoice
+    if (txDay >= closingDay) {
       month++;
       if (month > 12) {
         month = 1;
@@ -65,41 +65,45 @@ export class InvoiceService {
       }
     }
 
-    return new Date(dueYear, dueMonth - 1, dueDay);
+    // Use UTC noon to avoid timezone shifts causing the date to appear
+    // as the previous day in timezones behind UTC (e.g. BRT = UTC-3).
+    return new Date(Date.UTC(dueYear, dueMonth - 1, dueDay, 12, 0, 0));
   }
 
   /**
    * Calculates the date range for an invoice period.
-   * Returns the closing date (end of period) and previous closing date (end of previous period).
    *
-   * The range is: previousClosingDate < transaction.date <= closingDate
-   * Both dates are set to 23:59:59 so that:
-   * - closingDate includes all transactions up to end of closing day
-   * - previousClosingDate (with gt:) excludes transactions from the previous closing day
+   * The range is: invoiceStart <= transaction.date < invoiceEnd
+   * - invoiceStart: closing day of the previous month (inclusive — purchases on this day open the invoice)
+   * - invoiceEnd:   closing day of the current month  (exclusive — purchases on this day open the next invoice)
+   *
+   * e.g. closingDay=2, invoiceMonth=4 (April):
+   *   invoiceStart = March 2 00:00:00  (gte)
+   *   invoiceEnd   = April 2 00:00:00  (lt)
    */
   calculateInvoiceDateRange(
     invoiceMonth: number,
     invoiceYear: number,
     closingDay: number,
-  ): { closingDate: Date; previousClosingDate: Date } {
-    const closingDate = new Date(
-      invoiceYear,
-      invoiceMonth - 1,
-      closingDay,
-      23,
-      59,
-      59,
-    );
-    const previousClosingDate = new Date(
+  ): { invoiceStart: Date; invoiceEnd: Date } {
+    const invoiceStart = new Date(
       invoiceYear,
       invoiceMonth - 2,
       closingDay,
-      23,
-      59,
-      59,
+      0,
+      0,
+      0,
+    );
+    const invoiceEnd = new Date(
+      invoiceYear,
+      invoiceMonth - 1,
+      closingDay,
+      0,
+      0,
+      0,
     );
 
-    return { closingDate, previousClosingDate };
+    return { invoiceStart, invoiceEnd };
   }
 
   /**
@@ -113,7 +117,7 @@ export class InvoiceService {
     closingDay: number,
     includeCategory = false,
   ) {
-    const { closingDate, previousClosingDate } = this.calculateInvoiceDateRange(
+    const { invoiceStart, invoiceEnd } = this.calculateInvoiceDateRange(
       invoiceMonth,
       invoiceYear,
       closingDay,
@@ -136,8 +140,8 @@ export class InvoiceService {
         creditCardId,
         userId,
         date: {
-          gt: previousClosingDate,
-          lte: closingDate,
+          gte: invoiceStart,
+          lt: invoiceEnd,
         },
       },
       include,
@@ -146,7 +150,53 @@ export class InvoiceService {
       },
     });
 
-    return { transactions, closingDate, previousClosingDate };
+    return { transactions, invoiceStart, invoiceEnd };
+  }
+
+  /**
+   * Fetches all credit card transactions for the currently open invoice period.
+   * Determines the current period from today's date and the card's closing day.
+   */
+  async getCurrentInvoiceTransactions(
+    userId: string,
+    creditCardId: string,
+    closingDay: number,
+    includeCategory = false,
+  ) {
+    const today = new Date();
+    const { month, year } = this.calculateInvoicePeriod(today, closingDay);
+    return this.getInvoiceTransactions(
+      userId,
+      creditCardId,
+      month,
+      year,
+      closingDay,
+      includeCategory,
+    );
+  }
+
+  /**
+   * Fetches invoice transactions for a card, resolving the closingDay automatically.
+   * Convenience wrapper for use by other modules.
+   */
+  async getInvoiceTransactionsForCard(
+    userId: string,
+    creditCardId: string,
+    invoiceMonth: number,
+    invoiceYear: number,
+  ) {
+    const card = await this.creditCardsRepo.findFirst({
+      where: { id: creditCardId, userId },
+    });
+    if (!card) return [];
+    const { transactions } = await this.getInvoiceTransactions(
+      userId,
+      creditCardId,
+      invoiceMonth,
+      invoiceYear,
+      card.closingDay,
+    );
+    return transactions;
   }
 
   /**

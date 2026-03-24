@@ -87,10 +87,10 @@ export class CreditCardTransactionsService {
         Math.floor((value / installments) * 100) / 100;
       const purchaseDate = new Date(date);
 
-      // Calculate the remainder to add to the last installment
+      // Calculate the remainder to add to the first installment
       // This ensures the sum of all installments equals the original value
       const totalOfBaseInstallments = baseInstallmentValue * (installments - 1);
-      const lastInstallmentValue =
+      const firstInstallmentValue =
         Math.round((value - totalOfBaseInstallments) * 100) / 100;
 
       const transactionsData = [];
@@ -99,15 +99,15 @@ export class CreditCardTransactionsService {
         const installmentDate = this.addMonthsToDate(purchaseDate, i);
         transactionDates.push(installmentDate);
 
-        const isLastInstallment = i === installments - 1;
+        const isFirstInstallment = i === 0;
 
         transactionsData.push({
           userId,
           creditCardId,
           categoryId,
           name: `${name} (${i + 1}/${installments})`,
-          value: isLastInstallment
-            ? lastInstallmentValue
+          value: isFirstInstallment
+            ? firstInstallmentValue
             : baseInstallmentValue,
           date: installmentDate,
           installments,

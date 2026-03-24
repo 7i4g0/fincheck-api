@@ -42,29 +42,26 @@ export class CreditCardsService {
   async findAllByUserId(userId: string) {
     const creditCards = await this.creditCardsRepo.findMany({
       where: { userId },
-      include: {
-        transactions: {
-          select: {
-            value: true,
-            date: true,
-          },
-        },
-      },
     });
 
-    return creditCards.map((card) => {
-      // Calculate current invoice total (transactions not yet paid)
-      const totalInvoice = card.transactions.reduce(
-        (acc, t) => acc + t.value,
-        0,
-      );
+    return Promise.all(
+      creditCards.map(async (card) => {
+        const { transactions } =
+          await this.invoiceService.getCurrentInvoiceTransactions(
+            userId,
+            card.id,
+            card.closingDay,
+          );
 
-      return {
-        ...card,
-        totalInvoice,
-        availableLimit: card.limit - totalInvoice,
-      };
-    });
+        const totalInvoice = transactions.reduce((acc, t) => acc + t.value, 0);
+
+        return {
+          ...card,
+          totalInvoice,
+          availableLimit: card.limit - totalInvoice,
+        };
+      }),
+    );
   }
 
   async update(
@@ -115,7 +112,7 @@ export class CreditCardsService {
     }
 
     // Use InvoiceService to get transactions and date range
-    const { transactions, closingDate } =
+    const { transactions, invoiceEnd: closingDate } =
       await this.invoiceService.getInvoiceTransactions(
         userId,
         creditCardId,
