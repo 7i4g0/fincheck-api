@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { InvoiceService } from '../../credit-cards/services/invoice.service';
 import { BankAccountsRepository } from '../../../shared/database/repositories/bank-accounts.repositories';
 import { CategoriesRepository } from '../../../shared/database/repositories/categories.repositories';
 import { CreditCardTransactionsRepository } from '../../../shared/database/repositories/credit-card-transactions.repositories';
@@ -13,6 +14,7 @@ export class FinancialContextService {
     private readonly categoriesRepo: CategoriesRepository,
     private readonly creditCardsRepo: CreditCardsRepository,
     private readonly creditCardTransactionsRepo: CreditCardTransactionsRepository,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   async getBankAccounts(userId: string) {
@@ -150,52 +152,33 @@ export class FinancialContextService {
   }
 
   async getCreditCards(userId: string) {
-    const today = new Date();
-    const todayDay = today.getUTCDate();
+    const [cards, categories] = await Promise.all([
+      this.creditCardsRepo.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          name: true,
+          limit: true,
+          closingDay: true,
+          dueDay: true,
+        },
+      }),
+      this.categoriesRepo.findMany({
+        where: { userId },
+        select: { id: true, name: true },
+      }),
+    ]);
 
-    const cards = await this.creditCardsRepo.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        name: true,
-        limit: true,
-        closingDay: true,
-        dueDay: true,
-      },
-    });
+    const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
 
     return Promise.all(
       cards.map(async (card) => {
-        // Determine the current invoice period based on closing day
-        // If today is before closing day: invoice covers last month's closing to this month's closing
-        // If today is on/after closing day: invoice covers this month's closing to next month's closing
-        let invoiceStart: Date;
-        let invoiceEnd: Date;
-
-        if (todayDay < card.closingDay) {
-          invoiceStart = new Date(
-            Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, card.closingDay),
-          );
-          invoiceEnd = new Date(
-            Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), card.closingDay),
-          );
-        } else {
-          invoiceStart = new Date(
-            Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), card.closingDay),
-          );
-          invoiceEnd = new Date(
-            Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, card.closingDay),
-          );
-        }
-
-        const transactions = await this.creditCardTransactionsRepo.findMany({
-          where: {
+        const { transactions } =
+          await this.invoiceService.getCurrentInvoiceTransactions(
             userId,
-            creditCardId: card.id,
-            date: { gte: invoiceStart, lt: invoiceEnd },
-          },
-          select: { value: true },
-        });
+            card.id,
+            card.closingDay,
+          );
 
         const currentInvoiceTotal = transactions.reduce(
           (sum, t) => sum + t.value,
@@ -209,6 +192,15 @@ export class FinancialContextService {
           dueDay: card.dueDay,
           currentInvoiceTotal,
           availableLimit: card.limit - currentInvoiceTotal,
+          transactions: transactions.map((t) => ({
+            name: t.name,
+            value: t.value,
+            date: t.date,
+            installments: t.installments,
+            currentInstallment: t.currentInstallment,
+            category:
+              (t.categoryId && categoryNameById.get(t.categoryId)) || null,
+          })),
         };
       }),
     );
@@ -230,7 +222,9 @@ export class FinancialContextService {
     const now = new Date();
 
     const periods = Array.from({ length: months }, (_, i) => {
-      const date = new Date(Date.UTC(now.getFullYear(), now.getMonth() - (months - 1 - i), 1));
+      const date = new Date(
+        Date.UTC(now.getFullYear(), now.getMonth() - (months - 1 - i), 1),
+      );
       return { month: date.getUTCMonth() + 1, year: date.getUTCFullYear() };
     });
 
@@ -262,22 +256,32 @@ export class FinancialContextService {
     return results;
   }
 
-  async buildContext(userId: string, month: number, year: number): Promise<string> {
+  async buildContext(
+    userId: string,
+    month: number,
+    year: number,
+  ): Promise<string> {
     const brl = (v: number) =>
       v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-    const monthName = new Date(Date.UTC(year, month - 1, 1))
-      .toLocaleString('pt-BR', { month: 'long', timeZone: 'UTC' });
+    const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString(
+      'pt-BR',
+      { month: 'long', timeZone: 'UTC' },
+    );
 
-    const [accounts, creditCards, transactions, ccTransactions, categoryBreakdown, trend] =
+    const [accounts, creditCards, transactions, categoryBreakdown, trend] =
       await Promise.all([
         this.getBankAccounts(userId),
         this.getCreditCards(userId),
         this.getTransactions(userId, month, year),
-        this.getCreditCardTransactions(userId, month, year),
         this.getCategoryBreakdown(userId, month, year),
         this.getMonthlyTrend(userId, 3),
       ]);
+
+    // Credit card transactions come directly from getCreditCards (already filtered by invoice period)
+    const allCcTransactions = creditCards.flatMap((c) =>
+      c.transactions.map((t) => ({ ...t, creditCard: c.name })),
+    );
 
     const totalIncome = transactions
       .filter((t) => t.type === 'INCOME')
@@ -285,7 +289,10 @@ export class FinancialContextService {
     const totalExpense = transactions
       .filter((t) => t.type === 'EXPENSE')
       .reduce((s, t) => s + t.value, 0);
-    const totalCcExpense = ccTransactions.reduce((s, t) => s + t.value, 0);
+    const totalCcExpense = creditCards.reduce(
+      (s, c) => s + c.currentInvoiceTotal,
+      0,
+    );
 
     const lines: string[] = [
       `=== CONTEXTO FINANCEIRO — ${monthName.toUpperCase()} ${year} ===`,
@@ -297,7 +304,9 @@ export class FinancialContextService {
       lines.push('Nenhuma conta cadastrada.');
     } else {
       for (const a of accounts) {
-        lines.push(`${a.name} (${a.type}): saldo atual ${brl(a.currentBalance)}`);
+        lines.push(
+          `${a.name} (${a.type}): saldo atual ${brl(a.currentBalance)}`,
+        );
       }
       const totalBalance = accounts.reduce((s, a) => s + a.currentBalance, 0);
       lines.push(`Total em contas: ${brl(totalBalance)}`);
@@ -309,30 +318,39 @@ export class FinancialContextService {
     } else {
       for (const c of creditCards) {
         lines.push(
-          `${c.name}: limite ${brl(c.limit)} | fatura atual ${brl(c.currentInvoiceTotal)} | disponível ${brl(c.availableLimit)} | fecha dia ${c.closingDay} | vence dia ${c.dueDay}`,
+          `${c.name}: limite ${brl(c.limit)} | fatura atual ${brl(c.currentInvoiceTotal)} | disponível ${brl(c.availableLimit)} | fecha dia ${c.closingDay} (compras neste dia já vão para a próxima fatura) | vence dia ${c.dueDay} (o saldo da conta só é debitado neste dia)`,
         );
       }
     }
 
     lines.push('', `--- TRANSAÇÕES DE CONTAS — ${monthName}/${year} ---`);
-    lines.push(`Receitas: ${brl(totalIncome)} | Despesas: ${brl(totalExpense)} | Saldo do mês: ${brl(totalIncome - totalExpense)}`);
+    lines.push(
+      `Receitas: ${brl(totalIncome)} | Despesas: ${brl(totalExpense)} | Saldo do mês: ${brl(totalIncome - totalExpense)}`,
+    );
     if (transactions.length > 0) {
       for (const t of transactions) {
         const cat = t.category ? ` [${t.category}]` : '';
-        lines.push(`  ${t.type === 'INCOME' ? '+' : '-'} ${brl(t.value)} — ${t.name}${cat}`);
+        lines.push(
+          `  ${t.type === 'INCOME' ? '+' : '-'} ${brl(t.value)} — ${t.name}${cat}`,
+        );
       }
     }
 
-    lines.push('', `--- COMPRAS NO CARTÃO DE CRÉDITO — ${monthName}/${year} ---`);
+    lines.push('', '--- COMPRAS NO CARTÃO DE CRÉDITO (fatura atual) ---');
     lines.push(`Total: ${brl(totalCcExpense)}`);
-    if (ccTransactions.length > 0) {
-      for (const t of ccTransactions) {
+    if (allCcTransactions.length > 0) {
+      for (const t of allCcTransactions) {
         const cat = t.category ? ` [${t.category}]` : '';
-        const inst = t.installments > 1 ? ` (${t.currentInstallment}/${t.installments}x)` : '';
-        lines.push(`  - ${brl(t.value)} — ${t.name}${cat}${inst} (${t.creditCard})`);
+        const inst =
+          t.installments > 1
+            ? ` (${t.currentInstallment}/${t.installments}x)`
+            : '';
+        lines.push(
+          `  - ${brl(t.value)} — ${t.name}${cat}${inst} (${t.creditCard})`,
+        );
       }
     } else {
-      lines.push('Nenhuma compra no cartão neste mês.');
+      lines.push('Nenhuma compra na fatura atual.');
     }
 
     lines.push('', '--- GASTOS POR CATEGORIA ---');
@@ -346,9 +364,13 @@ export class FinancialContextService {
 
     lines.push('', '--- HISTÓRICO MENSAL (últimos 3 meses) ---');
     for (const t of trend) {
-      const mn = new Date(Date.UTC(t.year, t.month - 1, 1))
-        .toLocaleString('pt-BR', { month: 'long', timeZone: 'UTC' });
-      lines.push(`${mn}/${t.year}: receitas ${brl(t.income)} | despesas ${brl(t.expense)} | saldo ${brl(t.income - t.expense)}`);
+      const mn = new Date(Date.UTC(t.year, t.month - 1, 1)).toLocaleString(
+        'pt-BR',
+        { month: 'long', timeZone: 'UTC' },
+      );
+      lines.push(
+        `${mn}/${t.year}: receitas ${brl(t.income)} | despesas ${brl(t.expense)} | saldo ${brl(t.income - t.expense)}`,
+      );
     }
 
     lines.push('', '=== FIM DO CONTEXTO ===');
@@ -378,7 +400,8 @@ export class FinancialContextService {
 
     const breakdown: Record<string, number> = {};
     for (const t of transactions) {
-      const categoryName = (t.categoryId && categoryNameById.get(t.categoryId)) || 'Sem categoria';
+      const categoryName =
+        (t.categoryId && categoryNameById.get(t.categoryId)) || 'Sem categoria';
       breakdown[categoryName] = (breakdown[categoryName] ?? 0) + t.value;
     }
 

@@ -15,5 +15,6 @@ import { BankAccountsModule } from '../bank-accounts/bank-accounts.module';
     InvoiceService,
     VerifyCreditCardOwnershipService,
   ],
+  exports: [InvoiceService],
 })
 export class CreditCardsModule {}

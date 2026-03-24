@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { InvoiceService } from '../../credit-cards/services/invoice.service';
 import { TransactionsRepository } from '../../../shared/database/repositories/transactions.repositories';
 import { VerifyBankAccountOwnershipService } from '../../bank-accounts/services/verify-bank-account-ownership.service';
 import { VerifyCategoryOwnershipService } from '../../categories/services/verify-category-ownership.service';
@@ -14,6 +15,7 @@ export class TransactionsService {
     private readonly verifyBankAccountOwnershipService: VerifyBankAccountOwnershipService,
     private readonly verifyCategoryOwnershipService: VerifyCategoryOwnershipService,
     private readonly verifyTransactionOwnershipService: VerifyTransactionOwnershipService,
+    private readonly invoiceService: InvoiceService,
   ) {}
 
   async create(userId: string, createTransactionDto: CreateTransactionDto) {
@@ -67,7 +69,7 @@ export class TransactionsService {
     });
   }
 
-  findAllByUserId(
+  async findAllByUserId(
     userId: string,
     filters: {
       month: number;
@@ -76,7 +78,7 @@ export class TransactionsService {
       type?: TransactionType;
     },
   ) {
-    return this.transactionsRepo.findMany({
+    const transactions = await this.transactionsRepo.findMany({
       where: {
         userId,
         OR: filters.bankAccountId
@@ -127,6 +129,25 @@ export class TransactionsService {
         date: 'desc',
       },
     });
+
+    // For invoice transactions, recompute the value from CreditCardTransaction
+    // records using the correct invoice period logic, so the value is always accurate.
+    return Promise.all(
+      transactions.map(async (t) => {
+        if (t.creditCardId && t.invoiceMonth != null && t.invoiceYear != null) {
+          const ccTransactions =
+            await this.invoiceService.getInvoiceTransactionsForCard(
+              userId,
+              t.creditCardId,
+              t.invoiceMonth,
+              t.invoiceYear,
+            );
+          const value = ccTransactions.reduce((acc, ct) => acc + ct.value, 0);
+          return { ...t, value };
+        }
+        return t;
+      }),
+    );
   }
 
   async update(
