@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import { FeatureType } from '@prisma/client';
 import { env } from '../../../shared/config/env';
+import { UsageTrackingService } from '../../usage-tracking/usage-tracking.service';
 import { ChatMessageDto } from '../dto/chat-message.dto';
 import { FinancialContextService } from './financial-context.service';
 
@@ -33,7 +35,10 @@ export class AiAdvisorService {
   private readonly anthropic: Anthropic;
   private readonly model: string;
 
-  constructor(private readonly financialContextService: FinancialContextService) {
+  constructor(
+    private readonly financialContextService: FinancialContextService,
+    private readonly usageTracking: UsageTrackingService,
+  ) {
     this.anthropic = new Anthropic({ apiKey: env.anthropicApiKey });
     this.model = env.anthropicModel ?? 'claude-haiku-4-5';
   }
@@ -66,6 +71,15 @@ export class AiAdvisorService {
       max_tokens: 1024,
       system: systemPrompt,
       messages,
+    });
+
+    void this.usageTracking.track({
+      userId,
+      feature: FeatureType.CHAT,
+      model: this.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      metadata: { messageCount: messages.length },
     });
 
     const textBlock = response.content.find((b) => b.type === 'text');

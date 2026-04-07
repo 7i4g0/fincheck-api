@@ -3,10 +3,17 @@ import { CreditCardTransactionsRepository } from '../../../shared/database/repos
 import { CreditCardsRepository } from '../../../shared/database/repositories/credit-cards.repositories';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
+import { FeatureType } from '@prisma/client';
 import { env } from '../../../shared/config/env';
+import { UsageTrackingService } from '../../usage-tracking/usage-tracking.service';
 import { InvoiceService } from '../../credit-cards/services/invoice.service';
 import { ConfirmInvoiceImportDto } from '../dto/confirm-invoice-import.dto';
 import { BankParserRegistry } from './bank-parser.registry';
+
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
 
 export interface ParsedTransaction {
   name: string;
@@ -25,6 +32,7 @@ export class InvoiceImportService {
     private readonly creditCardTransactionsRepo: CreditCardTransactionsRepository,
     private readonly invoiceService: InvoiceService,
     private readonly parserRegistry: BankParserRegistry,
+    private readonly usageTracking: UsageTrackingService,
   ) {
     this.anthropic = new Anthropic({ apiKey: env.anthropicApiKey });
   }
@@ -45,6 +53,9 @@ export class InvoiceImportService {
     const parser = this.parserRegistry.findParser(invoiceText);
 
     let transactions: ParsedTransaction[];
+    let extractionUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+    let usedAiExtraction = false;
+
     if (parser) {
       transactions = parser.extract(invoiceText);
       console.log(
@@ -52,17 +63,32 @@ export class InvoiceImportService {
       );
     } else {
       console.log('[invoice-import] parser=ai-fallback — no regex parser matched');
-      transactions = await this.extractWithAI(invoiceText);
+      const result = await this.extractWithAI(invoiceText);
+      transactions = result.transactions;
+      extractionUsage = result.usage;
+      usedAiExtraction = true;
       console.log(
         `[invoice-import] parser=ai-fallback transactions=${transactions.length}`,
       );
     }
 
     // Step 2: suggest categories with Haiku
-    const categorized = await this.applyCategorySuggestions(
+    const { transactions: categorized, usage: categoryUsage } =
+      await this.applyCategorySuggestions(userId, transactions);
+
+    const model = env.anthropicModel ?? 'claude-haiku-4-5';
+    void this.usageTracking.track({
       userId,
-      transactions,
-    );
+      feature: FeatureType.INVOICE_IMPORT,
+      model,
+      inputTokens: extractionUsage.inputTokens + categoryUsage.inputTokens,
+      outputTokens: extractionUsage.outputTokens + categoryUsage.outputTokens,
+      metadata: {
+        transactionsCount: categorized.length,
+        usedAiExtraction,
+        parser: parser?.bankName ?? null,
+      },
+    });
 
     return { transactions: categorized };
   }
@@ -82,10 +108,22 @@ export class InvoiceImportService {
 
     if (categories.length === 0) return {};
 
-    return this.callCategoryAI(
+    const { mapping, usage } = await this.callCategoryAI(
       names,
       categories as { id: string; name: string }[],
     );
+
+    const model = env.anthropicModel ?? 'claude-haiku-4-5';
+    void this.usageTracking.track({
+      userId,
+      feature: FeatureType.INVOICE_IMPORT,
+      model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      metadata: { namesCount: names.length },
+    });
+
+    return mapping;
   }
 
   // ─── Confirm import ───────────────────────────────────────────────────────────
@@ -130,20 +168,40 @@ export class InvoiceImportService {
   private async applyCategorySuggestions(
     userId: string,
     transactions: ParsedTransaction[],
-  ): Promise<ParsedTransaction[]> {
+  ): Promise<{ transactions: ParsedTransaction[]; usage: TokenUsage }> {
     const names = transactions.map((t) => t.name);
-    const suggestions = await this.suggestCategories(userId, names);
 
-    return transactions.map((t) => ({
-      ...t,
-      suggestedCategoryId: suggestions[t.name] ?? undefined,
-    }));
+    if (names.length === 0) {
+      return { transactions, usage: { inputTokens: 0, outputTokens: 0 } };
+    }
+
+    const categories = await this.categoriesRepo.findMany({
+      where: { userId, type: 'EXPENSE' },
+      select: { id: true, name: true },
+    });
+
+    if (categories.length === 0) {
+      return { transactions, usage: { inputTokens: 0, outputTokens: 0 } };
+    }
+
+    const { mapping, usage } = await this.callCategoryAI(
+      names,
+      categories as { id: string; name: string }[],
+    );
+
+    return {
+      transactions: transactions.map((t) => ({
+        ...t,
+        suggestedCategoryId: mapping[t.name] ?? undefined,
+      })),
+      usage,
+    };
   }
 
   private async callCategoryAI(
     names: string[],
     categories: { id: string; name: string }[],
-  ): Promise<Record<string, string>> {
+  ): Promise<{ mapping: Record<string, string>; usage: TokenUsage }> {
     const categoryList = categories
       .map((c) => `- ${c.name} (id: ${c.id})`)
       .join('\n');
@@ -171,6 +229,11 @@ Example: {"Max Atacadista":"<category-id>","Netflix":"<category-id>"}`;
       messages: [{ role: 'user', content: prompt }],
     });
 
+    const usage: TokenUsage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
+
     const textBlock = response.content.find((b) => b.type === 'text');
     const raw = textBlock?.type === 'text' ? textBlock.text : '{}';
 
@@ -182,20 +245,20 @@ Example: {"Max Atacadista":"<category-id>","Netflix":"<category-id>"}`;
 
     if (jsonMatch) {
       try {
-        return JSON.parse(jsonMatch[0]) as Record<string, string>;
+        return { mapping: JSON.parse(jsonMatch[0]) as Record<string, string>, usage };
       } catch {
         // AI returned malformed JSON — return empty, no categories assigned
       }
     }
 
-    return {};
+    return { mapping: {}, usage };
   }
 
   // ─── AI extraction fallback (non-Nubank PDFs) ────────────────────────────────
 
   private async extractWithAI(
     invoiceText: string,
-  ): Promise<ParsedTransaction[]> {
+  ): Promise<{ transactions: ParsedTransaction[]; usage: TokenUsage }> {
     const prompt = `You are parsing a Brazilian credit card statement. Extract every purchase transaction and return a JSON array.
 
 Each object: { "name": string, "value": number, "date": "YYYY-MM-DD" }
@@ -214,6 +277,11 @@ ${invoiceText.slice(0, 20000)}`;
       messages: [{ role: 'user', content: prompt }],
     });
 
+    const usage: TokenUsage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
+
     const textBlock = response.content.find((b) => b.type === 'text');
     const raw = textBlock?.type === 'text' ? textBlock.text : '[]';
     const cleaned = raw
@@ -221,33 +289,36 @@ ${invoiceText.slice(0, 20000)}`;
       .replace(/```/g, '')
       .trim();
     const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return [];
+    if (!jsonMatch) return { transactions: [], usage };
 
     try {
       const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>[];
-      return parsed
-        .map((t) => ({
-          name: String(t.name ?? '').trim(),
-          value:
-            typeof t.value === 'number'
-              ? t.value
-              : parseFloat(
-                  String(t.value ?? '0')
-                    .replace(/[R$\s]/g, '')
-                    .replace(/\./g, '')
-                    .replace(',', '.'),
-                ),
-          date: String(t.date ?? '').trim(),
-        }))
-        .filter(
-          (t) =>
-            t.name.length > 0 &&
-            !isNaN(t.value) &&
-            t.value > 0 &&
-            t.date.length > 0,
-        );
+      return {
+        transactions: parsed
+          .map((t) => ({
+            name: String(t.name ?? '').trim(),
+            value:
+              typeof t.value === 'number'
+                ? t.value
+                : parseFloat(
+                    String(t.value ?? '0')
+                      .replace(/[R$\s]/g, '')
+                      .replace(/\./g, '')
+                      .replace(',', '.'),
+                  ),
+            date: String(t.date ?? '').trim(),
+          }))
+          .filter(
+            (t) =>
+              t.name.length > 0 &&
+              !isNaN(t.value) &&
+              t.value > 0 &&
+              t.date.length > 0,
+          ),
+        usage,
+      };
     } catch {
-      return [];
+      return { transactions: [], usage };
     }
   }
 }

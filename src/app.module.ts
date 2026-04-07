@@ -8,6 +8,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { CreditCardsModule } from './modules/credit-cards/credit-cards.module';
 import { InvoiceImportModule } from './modules/invoice-import/invoice-import.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
+import { UsageTrackingModule } from './modules/usage-tracking/usage-tracking.module';
 import { UsersModule } from './modules/users/users.module';
 import { DatabaseModule } from './shared/database/database.module';
 
@@ -22,6 +23,7 @@ import { DatabaseModule } from './shared/database/database.module';
     CreditCardsModule,
     InvoiceImportModule,
     AiAdvisorModule,
+    UsageTrackingModule,
   ],
   controllers: [],
   providers: [
