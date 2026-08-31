@@ -6,6 +6,8 @@ import { CreditCardTransactionsRepository } from '../../../shared/database/repos
 import { CreditCardsRepository } from '../../../shared/database/repositories/credit-cards.repositories';
 import { TransactionsRepository } from '../../../shared/database/repositories/transactions.repositories';
 
+const FINANCIAL_CONTEXT_MONTHS = 12;
+
 @Injectable()
 export class FinancialContextService {
   constructor(
@@ -83,9 +85,9 @@ export class FinancialContextService {
           type: true,
           date: true,
           categoryId: true,
+          creditCardId: true,
         },
         orderBy: { date: 'desc' },
-        take: 100,
       }),
       this.categoriesRepo.findMany({
         where: { userId },
@@ -101,6 +103,7 @@ export class FinancialContextService {
       type: t.type,
       date: t.date,
       category: (t.categoryId && categoryNameById.get(t.categoryId)) || null,
+      isCreditCardInvoicePayment: t.creditCardId !== null,
     }));
   }
 
@@ -130,7 +133,6 @@ export class FinancialContextService {
           creditCard: { select: { name: true } },
         },
         orderBy: { date: 'desc' },
-        take: 100,
       }),
       this.categoriesRepo.findMany({
         where: { userId },
@@ -218,7 +220,7 @@ export class FinancialContextService {
     });
   }
 
-  async getMonthlyTrend(userId: string, months = 3) {
+  async getMonthlyTrend(userId: string, months = FINANCIAL_CONTEXT_MONTHS) {
     const now = new Date();
 
     const periods = Array.from({ length: months }, (_, i) => {
@@ -230,26 +232,50 @@ export class FinancialContextService {
 
     const results = await Promise.all(
       periods.map(async ({ month, year }) => {
-        const transactions = await this.transactionsRepo.findMany({
-          where: {
-            userId,
-            date: {
-              gte: new Date(Date.UTC(year, month - 1, 1)),
-              lt: new Date(Date.UTC(year, month, 1)),
+        const [transactions, creditCardTransactions] = await Promise.all([
+          this.transactionsRepo.findMany({
+            where: {
+              userId,
+              date: {
+                gte: new Date(Date.UTC(year, month - 1, 1)),
+                lt: new Date(Date.UTC(year, month, 1)),
+              },
+              type: { in: ['INCOME', 'EXPENSE'] },
             },
-            type: { in: ['INCOME', 'EXPENSE'] },
-          },
-          select: { value: true, type: true },
-        });
+            select: { value: true, type: true, creditCardId: true },
+          }),
+          this.creditCardTransactionsRepo.findMany({
+            where: {
+              userId,
+              date: {
+                gte: new Date(Date.UTC(year, month - 1, 1)),
+                lt: new Date(Date.UTC(year, month, 1)),
+              },
+            },
+            select: { value: true },
+          }),
+        ]);
 
         const income = transactions
           .filter((t) => t.type === 'INCOME')
           .reduce((sum, t) => sum + t.value, 0);
-        const expense = transactions
-          .filter((t) => t.type === 'EXPENSE')
+        const accountExpense = transactions
+          .filter((t) => t.type === 'EXPENSE' && t.creditCardId === null)
           .reduce((sum, t) => sum + t.value, 0);
+        const creditCardExpense = creditCardTransactions.reduce(
+          (sum, t) => sum + t.value,
+          0,
+        );
+        const expense = accountExpense + creditCardExpense;
 
-        return { month, year, income, expense };
+        return {
+          month,
+          year,
+          income,
+          expense,
+          accountExpense,
+          creditCardExpense,
+        };
       }),
     );
 
@@ -269,14 +295,17 @@ export class FinancialContextService {
       { month: 'long', timeZone: 'UTC' },
     );
 
-    const [accounts, creditCards, transactions, categoryBreakdown, trend] =
-      await Promise.all([
-        this.getBankAccounts(userId),
-        this.getCreditCards(userId),
-        this.getTransactions(userId, month, year),
-        this.getCategoryBreakdown(userId, month, year),
-        this.getMonthlyTrend(userId, 3),
-      ]);
+    const [accounts, creditCards, history] = await Promise.all([
+      this.getBankAccounts(userId),
+      this.getCreditCards(userId),
+      this.getFinancialHistory(userId, month, year, FINANCIAL_CONTEXT_MONTHS),
+    ]);
+
+    const transactions = history.filter(
+      (transaction) =>
+        transaction.date.getUTCMonth() + 1 === month &&
+        transaction.date.getUTCFullYear() === year,
+    );
 
     // Credit card transactions come directly from getCreditCards (already filtered by invoice period)
     const allCcTransactions = creditCards.flatMap((c) =>
@@ -284,14 +313,34 @@ export class FinancialContextService {
     );
 
     const totalIncome = transactions
-      .filter((t) => t.type === 'INCOME')
+      .filter((t) => t.type === 'INCOME' && t.source === 'BANK_ACCOUNT')
       .reduce((s, t) => s + t.value, 0);
-    const totalExpense = transactions
-      .filter((t) => t.type === 'EXPENSE')
+    const totalAccountExpense = transactions
+      .filter(
+        (t) =>
+          t.type === 'EXPENSE' &&
+          t.source === 'BANK_ACCOUNT' &&
+          !t.isCreditCardInvoicePayment,
+      )
+      .reduce((s, t) => s + t.value, 0);
+    const totalCreditCardExpense = transactions
+      .filter((t) => t.source === 'CREDIT_CARD')
+      .reduce((s, t) => s + t.value, 0);
+    const totalExpense = totalAccountExpense + totalCreditCardExpense;
+    const totalInvoicePayments = transactions
+      .filter((t) => t.isCreditCardInvoicePayment)
       .reduce((s, t) => s + t.value, 0);
     const totalCcExpense = creditCards.reduce(
       (s, c) => s + c.currentInvoiceTotal,
       0,
+    );
+
+    const categoryBreakdown = this.buildCategoryBreakdown(transactions);
+    const trend = this.buildMonthlyTrend(
+      history,
+      month,
+      year,
+      FINANCIAL_CONTEXT_MONTHS,
     );
 
     const lines: string[] = [
@@ -323,17 +372,36 @@ export class FinancialContextService {
       }
     }
 
-    lines.push('', `--- TRANSAÇÕES DE CONTAS — ${monthName}/${year} ---`);
+    lines.push('', `--- VISÃO CONSOLIDADA — ${monthName}/${year} ---`);
     lines.push(
-      `Receitas: ${brl(totalIncome)} | Despesas: ${brl(totalExpense)} | Saldo do mês: ${brl(totalIncome - totalExpense)}`,
+      `Receitas: ${brl(totalIncome)} | Despesas fora do cartão: ${brl(totalAccountExpense)} | Compras no cartão: ${brl(totalCreditCardExpense)} | Despesas totais: ${brl(totalExpense)} | Resultado: ${brl(totalIncome - totalExpense)}`,
     );
+    if (totalInvoicePayments > 0) {
+      lines.push(
+        `Pagamentos de fatura no período: ${brl(totalInvoicePayments)} (movimentação de quitação, não somada novamente às despesas para evitar duplicidade).`,
+      );
+    }
     if (transactions.length > 0) {
       for (const t of transactions) {
         const cat = t.category ? ` [${t.category}]` : '';
+        const origin =
+          t.source === 'CREDIT_CARD'
+            ? `cartão ${t.creditCard}`
+            : t.isCreditCardInvoicePayment
+              ? 'pagamento de fatura'
+              : 'conta';
+        const inst =
+          t.source === 'CREDIT_CARD' && t.installments > 1
+            ? ` (${t.currentInstallment}/${t.installments}x)`
+            : '';
+        const sign =
+          t.type === 'INCOME' ? '+' : t.type === 'TRANSFER' ? '↔' : '-';
         lines.push(
-          `  ${t.type === 'INCOME' ? '+' : '-'} ${brl(t.value)} — ${t.name}${cat}`,
+          `  ${sign} ${brl(t.value)} — ${t.name}${cat}${inst} (${origin})`,
         );
       }
+    } else {
+      lines.push('Nenhum lançamento no mês.');
     }
 
     lines.push('', '--- COMPRAS NO CARTÃO DE CRÉDITO (fatura atual) ---');
@@ -362,15 +430,44 @@ export class FinancialContextService {
       lines.push('Sem dados.');
     }
 
-    lines.push('', '--- HISTÓRICO MENSAL (últimos 3 meses) ---');
+    lines.push(
+      '',
+      `--- HISTÓRICO MENSAL CONSOLIDADO (últimos ${FINANCIAL_CONTEXT_MONTHS} meses) ---`,
+    );
     for (const t of trend) {
       const mn = new Date(Date.UTC(t.year, t.month - 1, 1)).toLocaleString(
         'pt-BR',
         { month: 'long', timeZone: 'UTC' },
       );
       lines.push(
-        `${mn}/${t.year}: receitas ${brl(t.income)} | despesas ${brl(t.expense)} | saldo ${brl(t.income - t.expense)}`,
+        `${mn}/${t.year}: receitas ${brl(t.income)} | despesas fora do cartão ${brl(t.accountExpense)} | cartão ${brl(t.creditCardExpense)} | despesas totais ${brl(t.expense)} | resultado ${brl(t.income - t.expense)}`,
       );
+    }
+
+    lines.push(
+      '',
+      `--- TODOS OS LANÇAMENTOS DOS ÚLTIMOS ${FINANCIAL_CONTEXT_MONTHS} MESES ---`,
+    );
+    if (history.length === 0) {
+      lines.push('Nenhum lançamento no período.');
+    } else {
+      for (const t of history) {
+        const date = t.date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+        const cat = t.category ? ` [${t.category}]` : '';
+        const origin =
+          t.source === 'CREDIT_CARD'
+            ? `cartão ${t.creditCard}`
+            : t.isCreditCardInvoicePayment
+              ? 'pagamento de fatura'
+              : 'conta';
+        const inst =
+          t.source === 'CREDIT_CARD' && t.installments > 1
+            ? ` (${t.currentInstallment}/${t.installments}x)`
+            : '';
+        lines.push(
+          `  ${date} | ${t.type} | ${brl(t.value)} | ${t.name}${cat}${inst} | ${origin}`,
+        );
+      }
     }
 
     lines.push('', '=== FIM DO CONTEXTO ===');
@@ -378,28 +475,40 @@ export class FinancialContextService {
   }
 
   async getCategoryBreakdown(userId: string, month: number, year: number) {
-    const [transactions, categories] = await Promise.all([
-      this.transactionsRepo.findMany({
-        where: {
-          userId,
-          type: 'EXPENSE',
-          date: {
-            gte: new Date(Date.UTC(year, month - 1, 1)),
-            lt: new Date(Date.UTC(year, month, 1)),
+    const [transactions, creditCardTransactions, categories] =
+      await Promise.all([
+        this.transactionsRepo.findMany({
+          where: {
+            userId,
+            type: 'EXPENSE',
+            creditCardId: null,
+            date: {
+              gte: new Date(Date.UTC(year, month - 1, 1)),
+              lt: new Date(Date.UTC(year, month, 1)),
+            },
           },
-        },
-        select: { value: true, categoryId: true },
-      }),
-      this.categoriesRepo.findMany({
-        where: { userId },
-        select: { id: true, name: true },
-      }),
-    ]);
+          select: { value: true, categoryId: true },
+        }),
+        this.creditCardTransactionsRepo.findMany({
+          where: {
+            userId,
+            date: {
+              gte: new Date(Date.UTC(year, month - 1, 1)),
+              lt: new Date(Date.UTC(year, month, 1)),
+            },
+          },
+          select: { value: true, categoryId: true },
+        }),
+        this.categoriesRepo.findMany({
+          where: { userId },
+          select: { id: true, name: true },
+        }),
+      ]);
 
     const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
 
     const breakdown: Record<string, number> = {};
-    for (const t of transactions) {
+    for (const t of [...transactions, ...creditCardTransactions]) {
       const categoryName =
         (t.categoryId && categoryNameById.get(t.categoryId)) || 'Sem categoria';
       breakdown[categoryName] = (breakdown[categoryName] ?? 0) + t.value;
@@ -408,5 +517,146 @@ export class FinancialContextService {
     return Object.entries(breakdown)
       .map(([category, total]) => ({ category, total }))
       .sort((a, b) => b.total - a.total);
+  }
+
+  private async getFinancialHistory(
+    userId: string,
+    month: number,
+    year: number,
+    months: number,
+  ) {
+    const start = new Date(Date.UTC(year, month - months, 1));
+    const end = new Date(Date.UTC(year, month, 1));
+
+    const [transactions, creditCardTransactions, categories] =
+      await Promise.all([
+        this.transactionsRepo.findMany({
+          where: { userId, date: { gte: start, lt: end } },
+          select: {
+            name: true,
+            value: true,
+            type: true,
+            date: true,
+            categoryId: true,
+            creditCardId: true,
+          },
+        }),
+        this.creditCardTransactionsRepo.findMany({
+          where: { userId, date: { gte: start, lt: end } },
+          select: {
+            name: true,
+            value: true,
+            date: true,
+            installments: true,
+            currentInstallment: true,
+            categoryId: true,
+            creditCard: { select: { name: true } },
+          },
+        }),
+        this.categoriesRepo.findMany({
+          where: { userId },
+          select: { id: true, name: true },
+        }),
+      ]);
+
+    const categoryNameById = new Map(categories.map((c) => [c.id, c.name]));
+
+    return [
+      ...transactions.map((transaction) => ({
+        ...transaction,
+        source: 'BANK_ACCOUNT' as const,
+        category:
+          (transaction.categoryId &&
+            categoryNameById.get(transaction.categoryId)) ||
+          null,
+        isCreditCardInvoicePayment: transaction.creditCardId !== null,
+        creditCard: null,
+        installments: 1,
+        currentInstallment: 1,
+      })),
+      ...creditCardTransactions.map((transaction) => ({
+        ...transaction,
+        type: 'EXPENSE' as const,
+        source: 'CREDIT_CARD' as const,
+        category:
+          (transaction.categoryId &&
+            categoryNameById.get(transaction.categoryId)) ||
+          null,
+        isCreditCardInvoicePayment: false,
+        creditCard: transaction.creditCard.name,
+        creditCardId: null,
+      })),
+    ].sort((a, b) => b.date.getTime() - a.date.getTime());
+  }
+
+  private buildCategoryBreakdown(
+    transactions: Awaited<
+      ReturnType<FinancialContextService['getFinancialHistory']>
+    >,
+  ) {
+    const breakdown: Record<string, number> = {};
+
+    for (const transaction of transactions) {
+      if (
+        transaction.type !== 'EXPENSE' ||
+        transaction.isCreditCardInvoicePayment
+      ) {
+        continue;
+      }
+
+      const category = transaction.category || 'Sem categoria';
+      breakdown[category] = (breakdown[category] ?? 0) + transaction.value;
+    }
+
+    return Object.entries(breakdown)
+      .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  private buildMonthlyTrend(
+    history: Awaited<
+      ReturnType<FinancialContextService['getFinancialHistory']>
+    >,
+    month: number,
+    year: number,
+    months: number,
+  ) {
+    return Array.from({ length: months }, (_, index) => {
+      const period = new Date(Date.UTC(year, month - months + index, 1));
+      const periodMonth = period.getUTCMonth() + 1;
+      const periodYear = period.getUTCFullYear();
+      const transactions = history.filter(
+        (transaction) =>
+          transaction.date.getUTCMonth() + 1 === periodMonth &&
+          transaction.date.getUTCFullYear() === periodYear,
+      );
+      const income = transactions
+        .filter(
+          (transaction) =>
+            transaction.type === 'INCOME' &&
+            transaction.source === 'BANK_ACCOUNT',
+        )
+        .reduce((sum, transaction) => sum + transaction.value, 0);
+      const accountExpense = transactions
+        .filter(
+          (transaction) =>
+            transaction.type === 'EXPENSE' &&
+            transaction.source === 'BANK_ACCOUNT' &&
+            !transaction.isCreditCardInvoicePayment,
+        )
+        .reduce((sum, transaction) => sum + transaction.value, 0);
+      const creditCardExpense = transactions
+        .filter((transaction) => transaction.source === 'CREDIT_CARD')
+        .reduce((sum, transaction) => sum + transaction.value, 0);
+
+      return {
+        month: periodMonth,
+        year: periodYear,
+        income,
+        accountExpense,
+        creditCardExpense,
+        expense: accountExpense + creditCardExpense,
+      };
+    });
   }
 }

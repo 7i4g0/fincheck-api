@@ -8,10 +8,7 @@ export class AiAdvisorController {
   constructor(private readonly aiAdvisorService: AiAdvisorService) {}
 
   @Post('chat')
-  chat(
-    @ActiveUserId() userId: string,
-    @Body() dto: ChatMessageDto,
-  ) {
+  chat(@ActiveUserId() userId: string, @Body() dto: ChatMessageDto) {
     return this.aiAdvisorService.chat(userId, dto);
   }
 }

@@ -59,7 +59,8 @@ export class AiToolsService {
             },
             creditCardId: {
               type: 'string',
-              description: 'ID do cartão de crédito (opcional, para filtrar por cartão específico)',
+              description:
+                'ID do cartão de crédito (opcional, para filtrar por cartão específico)',
             },
           },
           required: ['month', 'year'],
@@ -88,13 +89,14 @@ export class AiToolsService {
       {
         name: 'get_monthly_trend',
         description:
-          'Retorna o histórico de receitas e despesas totais dos últimos N meses.',
+          'Retorna o histórico consolidado de receitas e despesas dos últimos N meses, incluindo gastos de contas e compras no cartão sem duplicar pagamentos de fatura.',
         input_schema: {
           type: 'object' as const,
           properties: {
             months: {
               type: 'number',
-              description: 'Número de meses para analisar (padrão: 3, máximo: 12)',
+              description:
+                'Número de meses para analisar (padrão e máximo: 12)',
             },
           },
           required: [],
@@ -163,7 +165,7 @@ export class AiToolsService {
           break;
 
         case 'get_monthly_trend': {
-          const months = Math.min((input.months as number) ?? 3, 12);
+          const months = Math.min((input.months as number) ?? 12, 12);
           result = await this.financialContext.getMonthlyTrend(userId, months);
           break;
         }

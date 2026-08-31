@@ -1,5 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
+import {
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import Anthropic, { APIError } from '@anthropic-ai/sdk';
 import { FeatureType } from '@prisma/client';
 import { env } from '../../../shared/config/env';
 import { UsageTrackingService } from '../../usage-tracking/usage-tracking.service';
@@ -7,6 +13,11 @@ import { ChatMessageDto } from '../dto/chat-message.dto';
 import { FinancialContextService } from './financial-context.service';
 
 const MAX_HISTORY_MESSAGES = 20;
+const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_RETRIES = 1;
+
+const UNAVAILABLE_MESSAGE =
+  'A Mainha está indisponível neste momento. Tente novamente em alguns minutos.';
 
 const SYSTEM_PROMPT = `Você é a Mainha, consultora financeira pessoal do Grana em Ordem, um aplicativo brasileiro de controle financeiro pessoal.
 
@@ -21,6 +32,8 @@ Suas responsabilidades:
 
 Regras importantes:
 - NUNCA invente ou assuma dados financeiros. Use APENAS os dados do contexto fornecido.
+- Considere sempre a visão consolidada dos últimos 12 meses e todos os lançamentos, tanto de contas quanto de cartões.
+- Pagamentos de fatura são quitações das compras já informadas e não devem ser somados novamente como despesa.
 - Use valores reais em Reais (R$) com formatação brasileira.
 - Seja direta, prática e use linguagem acessível — não acadêmica.
 - Mantenha um tom caloroso, cuidadoso e encorajador, como uma mãe que quer o melhor para o filho.
@@ -32,6 +45,7 @@ Regras importantes:
 
 @Injectable()
 export class AiAdvisorService {
+  private readonly logger = new Logger(AiAdvisorService.name);
   private readonly anthropic: Anthropic;
   private readonly model: string;
 
@@ -39,13 +53,22 @@ export class AiAdvisorService {
     private readonly financialContextService: FinancialContextService,
     private readonly usageTracking: UsageTrackingService,
   ) {
-    this.anthropic = new Anthropic({ apiKey: env.anthropicApiKey });
+    this.anthropic = new Anthropic({
+      apiKey: env.anthropicApiKey,
+      timeout: REQUEST_TIMEOUT_MS,
+      maxRetries: MAX_RETRIES,
+    });
     this.model = env.anthropicModel ?? 'claude-haiku-4-5';
   }
 
-  async chat(userId: string, dto: ChatMessageDto): Promise<{ message: string }> {
+  async chat(
+    userId: string,
+    dto: ChatMessageDto,
+  ): Promise<{ message: string }> {
     const timezone = dto.timezone ?? 'America/Sao_Paulo';
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: timezone }));
+    const now = new Date(
+      new Date().toLocaleString('en-US', { timeZone: timezone }),
+    );
     const month = now.getMonth() + 1;
     const year = now.getFullYear();
 
@@ -66,23 +89,82 @@ export class AiAdvisorService {
       .slice(-MAX_HISTORY_MESSAGES)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    const response = await this.anthropic.messages.create({
-      model: this.model,
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages,
-    });
+    let response: Anthropic.Message;
 
-    void this.usageTracking.track({
-      userId,
-      feature: FeatureType.CHAT,
-      model: this.model,
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      metadata: { messageCount: messages.length },
-    });
+    try {
+      response = await this.anthropic.messages.create({
+        model: this.model,
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+      });
+    } catch (error) {
+      throw this.buildChatException(error);
+    }
+
+    this.usageTracking
+      .track({
+        userId,
+        feature: FeatureType.CHAT,
+        model: this.model,
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        metadata: { messageCount: messages.length },
+      })
+      .catch((error) => {
+        this.logger.error(
+          `Falha ao registrar consumo do chat: ${this.describeError(error)}`,
+        );
+      });
 
     const textBlock = response.content.find((b) => b.type === 'text');
-    return { message: textBlock?.type === 'text' ? textBlock.text : '' };
+    const message = textBlock?.type === 'text' ? textBlock.text.trim() : '';
+
+    if (!message) {
+      this.logger.warn(
+        `Resposta sem conteúdo de texto (stop_reason: ${response.stop_reason})`,
+      );
+      throw new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
+    }
+
+    return { message };
+  }
+
+  /**
+   * Converts Anthropic failures into HTTP responses the chat UI can display,
+   * without leaking provider details (billing state, request IDs) to the user.
+   */
+  private buildChatException(error: unknown): HttpException {
+    this.logger.error(
+      `Falha na chamada à Anthropic: ${this.describeError(error)}`,
+    );
+
+    if (!(error instanceof APIError)) {
+      return new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
+    }
+
+    if (error.status === 429) {
+      return new HttpException(
+        'A Mainha atingiu o limite de mensagens agora. Aguarde um instante e tente de novo.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    if (error.status === undefined) {
+      return new HttpException(
+        'A Mainha demorou demais para responder. Tente novamente.',
+        HttpStatus.GATEWAY_TIMEOUT,
+      );
+    }
+
+    return new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
+  }
+
+  private describeError(error: unknown): string {
+    if (error instanceof APIError) {
+      return `status=${error.status} requestId=${error.requestID} message=${error.message}`;
+    }
+
+    return error instanceof Error ? error.message : String(error);
   }
 }
