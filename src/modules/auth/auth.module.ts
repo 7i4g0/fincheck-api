@@ -22,5 +22,6 @@ import { RecaptchaService } from './services/recaptcha.service';
     PasswordResetService,
     EmailService,
   ],
+  exports: [EmailService],
 })
 export class AuthModule {}

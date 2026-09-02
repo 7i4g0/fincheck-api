@@ -124,7 +124,11 @@ export class AiAdvisorService {
       this.logger.warn(
         `Resposta sem conteúdo de texto (stop_reason: ${response.stop_reason})`,
       );
-      throw new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
+      throw new ServiceUnavailableException(UNAVAILABLE_MESSAGE, {
+        cause: new Error(
+          `Resposta sem texto (stop_reason: ${response.stop_reason})`,
+        ),
+      });
     }
 
     return { message };
@@ -140,13 +144,16 @@ export class AiAdvisorService {
     );
 
     if (!(error instanceof APIError)) {
-      return new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
+      return new ServiceUnavailableException(UNAVAILABLE_MESSAGE, {
+        cause: error,
+      });
     }
 
     if (error.status === 429) {
       return new HttpException(
         'A Mainha atingiu o limite de mensagens agora. Aguarde um instante e tente de novo.',
         HttpStatus.TOO_MANY_REQUESTS,
+        { cause: error },
       );
     }
 
@@ -154,10 +161,13 @@ export class AiAdvisorService {
       return new HttpException(
         'A Mainha demorou demais para responder. Tente novamente.',
         HttpStatus.GATEWAY_TIMEOUT,
+        { cause: error },
       );
     }
 
-    return new ServiceUnavailableException(UNAVAILABLE_MESSAGE);
+    return new ServiceUnavailableException(UNAVAILABLE_MESSAGE, {
+      cause: error,
+    });
   }
 
   private describeError(error: unknown): string {

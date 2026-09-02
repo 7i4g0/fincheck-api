@@ -107,4 +107,9 @@ export class AuthController {
         : 'Cookie NÃO chegou. Verifique: same domain/subdomain, Secure, SameSite, withCredentials.',
     };
   }
+
+  @Get('/debug-sentry')
+  getError() {
+    throw new Error('My first Sentry error!');
+  }
 }

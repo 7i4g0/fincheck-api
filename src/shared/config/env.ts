@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsEmail,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -24,6 +25,10 @@ class Env {
   @IsString()
   @IsOptional()
   anthropicModel?: string;
+
+  @IsEmail()
+  @IsOptional()
+  errorNotifyEmail?: string;
 }
 
 export const env: Env = plainToInstance(Env, {
@@ -31,6 +36,7 @@ export const env: Env = plainToInstance(Env, {
   jwtSecret: process.env.JWT_SECRET,
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
   anthropicModel: process.env.ANTHROPIC_MODEL,
+  errorNotifyEmail: process.env.ERROR_NOTIFY_EMAIL || undefined,
 });
 
 const errors = validateSync(env);
