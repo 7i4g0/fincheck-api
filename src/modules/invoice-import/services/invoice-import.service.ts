@@ -1,25 +1,39 @@
+import Anthropic from '@anthropic-ai/sdk';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { FeatureType } from '@prisma/client';
+import { env } from '../../../shared/config/env';
 import { CategoriesRepository } from '../../../shared/database/repositories/categories.repositories';
 import { CreditCardTransactionsRepository } from '../../../shared/database/repositories/credit-card-transactions.repositories';
 import { CreditCardsRepository } from '../../../shared/database/repositories/credit-cards.repositories';
-import { Injectable, NotFoundException } from '@nestjs/common';
-import Anthropic from '@anthropic-ai/sdk';
-import { FeatureType } from '@prisma/client';
-import { env } from '../../../shared/config/env';
-import { UsageTrackingService } from '../../usage-tracking/usage-tracking.service';
 import { InvoiceService } from '../../credit-cards/services/invoice.service';
+import { UsageTrackingService } from '../../usage-tracking/usage-tracking.service';
 import { ConfirmInvoiceImportDto } from '../dto/confirm-invoice-import.dto';
 import { BankParserRegistry } from './bank-parser.registry';
+import {
+  AttachedMatch,
+  ExistingMatchView,
+  matchInvoiceToExisting,
+} from './transaction-matcher';
 
 interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
 }
 
+/** Keeps each answer small enough that it can never hit the output token cap */
+const CATEGORY_BATCH_SIZE = 40;
+
 export interface ParsedTransaction {
   name: string;
   value: number;
   date: string;
   suggestedCategoryId?: string;
+  match?: AttachedMatch;
+}
+
+export interface InvoiceImportPreview {
+  transactions: ParsedTransaction[];
+  unmatchedExisting: ExistingMatchView[];
 }
 
 @Injectable()
@@ -43,7 +57,7 @@ export class InvoiceImportService {
     userId: string,
     creditCardId: string,
     invoiceText: string,
-  ): Promise<{ transactions: ParsedTransaction[] }> {
+  ): Promise<InvoiceImportPreview> {
     const card = await this.creditCardsRepo.findFirst({
       where: { id: creditCardId, userId },
     });
@@ -62,7 +76,9 @@ export class InvoiceImportService {
         `[invoice-import] parser=${parser.bankName} transactions=${transactions.length}`,
       );
     } else {
-      console.log('[invoice-import] parser=ai-fallback — no regex parser matched');
+      console.log(
+        '[invoice-import] parser=ai-fallback — no regex parser matched',
+      );
       const result = await this.extractWithAI(invoiceText);
       transactions = result.transactions;
       extractionUsage = result.usage;
@@ -90,7 +106,30 @@ export class InvoiceImportService {
       },
     });
 
-    return { transactions: categorized };
+    return this.attachMatches(
+      userId,
+      creditCardId,
+      card.closingDay,
+      categorized,
+    );
+  }
+
+  async matchExistingTransactions(
+    userId: string,
+    creditCardId: string,
+    transactions: ParsedTransaction[],
+  ): Promise<InvoiceImportPreview> {
+    const card = await this.creditCardsRepo.findFirst({
+      where: { id: creditCardId, userId },
+    });
+    if (!card) throw new NotFoundException('Cartão não encontrado.');
+
+    return this.attachMatches(
+      userId,
+      creditCardId,
+      card.closingDay,
+      transactions,
+    );
   }
 
   // ─── Category suggestion (used by both PDF and CSV flows) ────────────────────
@@ -137,13 +176,20 @@ export class InvoiceImportService {
     });
     if (!card) throw new NotFoundException('Cartão não encontrado.');
 
+    if (dto.transactions.length === 0) {
+      return {
+        message: 'Nenhuma transação nova para importar',
+        count: 0,
+      };
+    }
+
     const data = dto.transactions.map((t) => ({
       userId,
       creditCardId: dto.creditCardId,
       categoryId: t.categoryId ?? null,
       name: t.name,
       value: t.value,
-      date: new Date(t.date),
+      date: this.invoiceService.parseCalendarDate(t.date),
       installments: 1,
       currentInstallment: 1,
     }));
@@ -165,11 +211,69 @@ export class InvoiceImportService {
 
   // ─── Private helpers ──────────────────────────────────────────────────────────
 
+  private async attachMatches(
+    userId: string,
+    creditCardId: string,
+    closingDay: number,
+    transactions: ParsedTransaction[],
+  ): Promise<InvoiceImportPreview> {
+    if (transactions.length === 0) {
+      return { transactions, unmatchedExisting: [] };
+    }
+
+    const periodKeys = new Set<string>();
+    const ranges: Array<{ invoiceStart: Date; invoiceEnd: Date }> = [];
+
+    for (const transaction of transactions) {
+      const date = this.invoiceService.parseCalendarDate(transaction.date);
+      if (Number.isNaN(date.getTime())) continue;
+
+      const { month, year } = this.invoiceService.calculateInvoicePeriod(
+        date,
+        closingDay,
+      );
+      const key = `${month}-${year}`;
+      if (periodKeys.has(key)) continue;
+
+      periodKeys.add(key);
+      ranges.push(
+        this.invoiceService.calculateInvoiceDateRange(month, year, closingDay),
+      );
+    }
+
+    if (ranges.length === 0) {
+      return { transactions, unmatchedExisting: [] };
+    }
+
+    const existing = await this.creditCardTransactionsRepo.findMany({
+      where: {
+        userId,
+        creditCardId,
+        OR: ranges.map((range) => ({
+          date: { gte: range.invoiceStart, lt: range.invoiceEnd },
+        })),
+      },
+      select: { id: true, name: true, value: true, date: true },
+    });
+
+    const matched = matchInvoiceToExisting(transactions, existing);
+
+    return {
+      transactions: matched.transactions.map(({ item, match }) => ({
+        ...item,
+        match,
+      })),
+      unmatchedExisting: matched.unmatchedExisting,
+    };
+  }
+
   private async applyCategorySuggestions(
     userId: string,
     transactions: ParsedTransaction[],
   ): Promise<{ transactions: ParsedTransaction[]; usage: TokenUsage }> {
-    const names = transactions.map((t) => t.name);
+    const names = transactions
+      .filter((transaction) => transaction.value > 0)
+      .map((transaction) => transaction.name);
 
     if (names.length === 0) {
       return { transactions, usage: { inputTokens: 0, outputTokens: 0 } };
@@ -202,30 +306,67 @@ export class InvoiceImportService {
     names: string[],
     categories: { id: string; name: string }[],
   ): Promise<{ mapping: Record<string, string>; usage: TokenUsage }> {
-    const categoryList = categories
-      .map((c) => `- ${c.name} (id: ${c.id})`)
-      .join('\n');
-
     const unique = [...new Set(names)];
-    const transactionList = unique.map((n) => `- ${n}`).join('\n');
+
+    const batches: string[][] = [];
+    for (let i = 0; i < unique.length; i += CATEGORY_BATCH_SIZE) {
+      batches.push(unique.slice(i, i + CATEGORY_BATCH_SIZE));
+    }
+
+    const results = await Promise.all(
+      batches.map((batch, index) =>
+        this.classifyBatch(batch, categories, index + 1, batches.length),
+      ),
+    );
+
+    const mapping: Record<string, string> = {};
+    const usage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+
+    for (const result of results) {
+      Object.assign(mapping, result.mapping);
+      usage.inputTokens += result.usage.inputTokens;
+      usage.outputTokens += result.usage.outputTokens;
+    }
+
+    return { mapping, usage };
+  }
+
+  /**
+   * Classifies one batch of merchant names. The model answers with position
+   * numbers instead of category UUIDs: a UUID costs ~20 output tokens, so
+   * echoing names and ids for a full statement overflowed max_tokens and the
+   * truncated JSON was unparseable — every transaction came back uncategorized.
+   */
+  private async classifyBatch(
+    names: string[],
+    categories: { id: string; name: string }[],
+    batchNumber: number,
+    batchCount: number,
+  ): Promise<{ mapping: Record<string, string>; usage: TokenUsage }> {
+    const categoryList = categories
+      .map((c, index) => `${index + 1}. ${c.name}`)
+      .join('\n');
+    const transactionList = names
+      .map((name, index) => `${index + 1}. ${name}`)
+      .join('\n');
 
     const prompt = `You are classifying Brazilian credit card transactions into personal finance categories.
 
 Use semantic understanding — category names vary per user ("Mercado", "Supermercado", "Compras" can all map to a supermarket purchase). Match based on what the merchant sells, not text similarity. Every transaction MUST receive a category.
 
-User's categories:
+Categories (number. name):
 ${categoryList}
 
-Transactions to classify:
+Transactions (number. name):
 ${transactionList}
 
-Return ONLY a valid JSON object where each key is the exact transaction name and the value is the category ID.
+Return ONLY a valid JSON object mapping each transaction number to a category number.
 No markdown, no explanation, no extra text.
-Example: {"Max Atacadista":"<category-id>","Netflix":"<category-id>"}`;
+Example: {"1":3,"2":7}`;
 
     const response = await this.anthropic.messages.create({
       model: env.anthropicModel ?? 'claude-haiku-4-5',
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -235,23 +376,45 @@ Example: {"Max Atacadista":"<category-id>","Netflix":"<category-id>"}`;
     };
 
     const textBlock = response.content.find((b) => b.type === 'text');
-    const raw = textBlock?.type === 'text' ? textBlock.text : '{}';
+    const raw = textBlock?.type === 'text' ? textBlock.text : '';
+    const indexMapping = this.parseIndexMapping(raw);
 
+    const mapping: Record<string, string> = {};
+
+    for (const [rawName, rawCategory] of Object.entries(indexMapping)) {
+      const name = names[Number(rawName) - 1];
+      const category = categories[Number(rawCategory) - 1];
+      if (name && category) mapping[name] = category.id;
+    }
+
+    console.log(
+      `[invoice-import] categories batch=${batchNumber}/${batchCount} ` +
+        `mapped=${Object.keys(mapping).length}/${names.length} ` +
+        `stop=${response.stop_reason ?? 'unknown'}`,
+    );
+
+    return { mapping, usage };
+  }
+
+  /**
+   * Reads `{"1":3}` pairs one by one so a truncated or partially malformed
+   * response still yields the entries the model did manage to emit.
+   */
+  private parseIndexMapping(raw: string): Record<string, number> {
     const cleaned = raw
       .replace(/```(?:json)?\s*/g, '')
       .replace(/```/g, '')
       .trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
 
-    if (jsonMatch) {
-      try {
-        return { mapping: JSON.parse(jsonMatch[0]) as Record<string, string>, usage };
-      } catch {
-        // AI returned malformed JSON — return empty, no categories assigned
-      }
+    const mapping: Record<string, number> = {};
+    const pairRe = /"(\d+)"\s*:\s*"?(\d+)"?/g;
+
+    let match: RegExpExecArray | null;
+    while ((match = pairRe.exec(cleaned)) !== null) {
+      mapping[match[1]] = Number(match[2]);
     }
 
-    return { mapping: {}, usage };
+    return mapping;
   }
 
   // ─── AI extraction fallback (non-Nubank PDFs) ────────────────────────────────
