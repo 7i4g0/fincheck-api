@@ -24,24 +24,14 @@ export class CreditCardTransactionsService {
    * Example: Jan 31 + 1 month = Feb 28/29 (not Mar 2/3)
    */
   private addMonthsToDate(date: Date, monthsToAdd: number): Date {
-    const originalDay = date.getDate();
-    const result = new Date(date);
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth() + monthsToAdd;
+    const day = date.getUTCDate();
+    const lastDayOfMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
-    // Move to day 1 to avoid overflow, then set the target month
-    result.setDate(1);
-    result.setMonth(result.getMonth() + monthsToAdd);
-
-    // Get the last day of the target month
-    const lastDayOfMonth = new Date(
-      result.getFullYear(),
-      result.getMonth() + 1,
-      0,
-    ).getDate();
-
-    // Use the original day or the last day of the month, whichever is smaller
-    result.setDate(Math.min(originalDay, lastDayOfMonth));
-
-    return result;
+    return new Date(
+      Date.UTC(year, month, Math.min(day, lastDayOfMonth), 12, 0, 0),
+    );
   }
 
   async create(userId: string, createDto: CreateCreditCardTransactionDto) {
@@ -65,7 +55,7 @@ export class CreditCardTransactionsService {
 
     // If it is a single purchase (no installments)
     if (installments === 1) {
-      const txDate = new Date(date);
+      const txDate = this.invoiceService.parseCalendarDate(date);
       transactionDates.push(txDate);
 
       await this.creditCardTransactionsRepo.create({
@@ -85,7 +75,7 @@ export class CreditCardTransactionsService {
       const installmentGroupId = randomUUID();
       const baseInstallmentValue =
         Math.floor((value / installments) * 100) / 100;
-      const purchaseDate = new Date(date);
+      const purchaseDate = this.invoiceService.parseCalendarDate(date);
 
       // Calculate the remainder to add to the first installment
       // This ensures the sum of all installments equals the original value
@@ -196,7 +186,9 @@ export class CreditCardTransactionsService {
     }
 
     const oldDate = transaction.date;
-    const newDate = updateDto.date ? new Date(updateDto.date) : oldDate;
+    const newDate = updateDto.date
+      ? this.invoiceService.parseCalendarDate(updateDto.date)
+      : oldDate;
 
     // Update the transaction
     const updatedTransaction = await this.creditCardTransactionsRepo.update({
@@ -204,7 +196,9 @@ export class CreditCardTransactionsService {
       data: {
         name: updateDto.name,
         value: updateDto.value,
-        date: updateDto.date ? new Date(updateDto.date) : undefined,
+        date: updateDto.date
+          ? this.invoiceService.parseCalendarDate(updateDto.date)
+          : undefined,
         categoryId: updateDto.categoryId,
       },
     });

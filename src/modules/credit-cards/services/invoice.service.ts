@@ -14,13 +14,21 @@ export class InvoiceService {
   /**
    * Calculates which invoice (month/year) a transaction belongs to based on the closing day
    */
+  /**
+   * Interprets a calendar day (YYYY-MM-DD) as UTC noon so the same date stays
+   * in the same invoice whether the server runs in UTC or America/Sao_Paulo.
+   */
+  parseCalendarDate(value: string): Date {
+    return new Date(`${value.slice(0, 10)}T12:00:00.000Z`);
+  }
+
   calculateInvoicePeriod(
     transactionDate: Date,
     closingDay: number,
   ): { month: number; year: number } {
-    const txDay = transactionDate.getDate();
-    let month = transactionDate.getMonth() + 1;
-    let year = transactionDate.getFullYear();
+    const txDay = transactionDate.getUTCDate();
+    let month = transactionDate.getUTCMonth() + 1;
+    let year = transactionDate.getUTCFullYear();
 
     // If the transaction is on or after the closing day, it goes to the next invoice
     if (txDay >= closingDay) {
@@ -78,8 +86,8 @@ export class InvoiceService {
    * - invoiceEnd:   closing day of the current month  (exclusive — purchases on this day open the next invoice)
    *
    * e.g. closingDay=2, invoiceMonth=4 (April):
-   *   invoiceStart = March 2 00:00:00  (gte)
-   *   invoiceEnd   = April 2 00:00:00  (lt)
+   *   invoiceStart = March 2 00:00:00 UTC  (gte)
+   *   invoiceEnd   = April 2 00:00:00 UTC  (lt)
    */
   calculateInvoiceDateRange(
     invoiceMonth: number,
@@ -87,20 +95,10 @@ export class InvoiceService {
     closingDay: number,
   ): { invoiceStart: Date; invoiceEnd: Date } {
     const invoiceStart = new Date(
-      invoiceYear,
-      invoiceMonth - 2,
-      closingDay,
-      0,
-      0,
-      0,
+      Date.UTC(invoiceYear, invoiceMonth - 2, closingDay, 0, 0, 0),
     );
     const invoiceEnd = new Date(
-      invoiceYear,
-      invoiceMonth - 1,
-      closingDay,
-      0,
-      0,
-      0,
+      Date.UTC(invoiceYear, invoiceMonth - 1, closingDay, 0, 0, 0),
     );
 
     return { invoiceStart, invoiceEnd };

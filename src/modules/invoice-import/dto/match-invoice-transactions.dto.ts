@@ -4,38 +4,28 @@ import {
   IsDateString,
   IsNotEmpty,
   IsNumber,
-  IsOptional,
   IsString,
-  IsUUID,
-  NotEquals,
+  Min,
   ValidateNested,
 } from 'class-validator';
 
-export class ImportedTransactionDto {
+export class MatchInvoiceItemDto {
   @IsString()
   @IsNotEmpty({ message: 'O nome é obrigatório' })
   name: string;
 
   @IsNumber()
-  @NotEquals(0, { message: 'O valor não pode ser zero' })
+  @Min(0.01, { message: 'O valor deve ser maior que 0' })
   value: number;
 
   @IsDateString()
   @IsNotEmpty({ message: 'A data é obrigatória' })
   date: string;
-
-  @IsUUID()
-  @IsOptional()
-  categoryId?: string;
 }
 
-export class ConfirmInvoiceImportDto {
-  @IsUUID()
-  @IsNotEmpty({ message: 'O cartão é obrigatório' })
-  creditCardId: string;
-
+export class MatchInvoiceTransactionsDto {
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ImportedTransactionDto)
-  transactions: ImportedTransactionDto[];
+  @Type(() => MatchInvoiceItemDto)
+  transactions: MatchInvoiceItemDto[];
 }
