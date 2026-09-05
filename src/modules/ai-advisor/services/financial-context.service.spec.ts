@@ -8,7 +8,10 @@ describe('FinancialContextService', () => {
   const categoriesRepo = { findMany: jest.fn() };
   const creditCardsRepo = { findMany: jest.fn() };
   const creditCardTransactionsRepo = { findMany: jest.fn() };
-  const invoiceService = { getCurrentInvoiceTransactions: jest.fn() };
+  const invoiceService = {
+    getCurrentInvoiceTransactions: jest.fn(),
+    getOpenChargeTotals: jest.fn(),
+  };
 
   const service = new FinancialContextService(
     bankAccountsRepo as never,
@@ -47,6 +50,11 @@ describe('FinancialContextService', () => {
     ]);
     invoiceService.getCurrentInvoiceTransactions.mockResolvedValue({
       transactions: [],
+    });
+    invoiceService.getOpenChargeTotals.mockResolvedValue({
+      currentInvoiceTotal: 0,
+      futureTotal: 0,
+      usedLimit: 0,
     });
     transactionsRepo.findMany.mockResolvedValue([
       {

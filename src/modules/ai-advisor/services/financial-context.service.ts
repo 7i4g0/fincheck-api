@@ -186,6 +186,12 @@ export class FinancialContextService {
           (sum, t) => sum + t.value,
           0,
         );
+        const { usedLimit, futureTotal } =
+          await this.invoiceService.getOpenChargeTotals(
+            userId,
+            card.id,
+            card.closingDay,
+          );
 
         return {
           name: card.name,
@@ -193,7 +199,8 @@ export class FinancialContextService {
           closingDay: card.closingDay,
           dueDay: card.dueDay,
           currentInvoiceTotal,
-          availableLimit: card.limit - currentInvoiceTotal,
+          futureInvoiceTotal: futureTotal,
+          availableLimit: card.limit - usedLimit,
           transactions: transactions.map((t) => ({
             name: t.name,
             value: t.value,
@@ -367,7 +374,7 @@ export class FinancialContextService {
     } else {
       for (const c of creditCards) {
         lines.push(
-          `${c.name}: limite ${brl(c.limit)} | fatura atual ${brl(c.currentInvoiceTotal)} | disponível ${brl(c.availableLimit)} | fecha dia ${c.closingDay} (compras neste dia já vão para a próxima fatura) | vence dia ${c.dueDay} (o saldo da conta só é debitado neste dia)`,
+          `${c.name}: limite ${brl(c.limit)} | fatura atual ${brl(c.currentInvoiceTotal)} | lançamentos futuros ${brl(c.futureInvoiceTotal)} | disponível ${brl(c.availableLimit)} (o disponível já desconta a fatura atual e as parcelas futuras) | fecha dia ${c.closingDay} (compras neste dia já vão para a próxima fatura) | vence dia ${c.dueDay} (o saldo da conta só é debitado neste dia)`,
         );
       }
     }

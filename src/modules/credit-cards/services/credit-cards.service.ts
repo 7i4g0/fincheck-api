@@ -46,19 +46,18 @@ export class CreditCardsService {
 
     return Promise.all(
       creditCards.map(async (card) => {
-        const { transactions } =
-          await this.invoiceService.getCurrentInvoiceTransactions(
+        const { currentInvoiceTotal, futureTotal, usedLimit } =
+          await this.invoiceService.getOpenChargeTotals(
             userId,
             card.id,
             card.closingDay,
           );
 
-        const totalInvoice = transactions.reduce((acc, t) => acc + t.value, 0);
-
         return {
           ...card,
-          totalInvoice,
-          availableLimit: card.limit - totalInvoice,
+          totalInvoice: currentInvoiceTotal,
+          futureInvoice: futureTotal,
+          availableLimit: card.limit - usedLimit,
         };
       }),
     );

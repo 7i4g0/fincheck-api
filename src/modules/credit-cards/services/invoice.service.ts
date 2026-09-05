@@ -174,6 +174,54 @@ export class InvoiceService {
   }
 
   /**
+   * Current invoice plus later installments: both occupy the card limit
+   * until they are billed and paid.
+   */
+  async getOpenChargeTotals(
+    userId: string,
+    creditCardId: string,
+    closingDay: number,
+  ): Promise<{
+    currentInvoiceTotal: number;
+    futureTotal: number;
+    usedLimit: number;
+  }> {
+    const today = new Date();
+    const { month, year } = this.calculateInvoicePeriod(today, closingDay);
+    const { invoiceStart, invoiceEnd } = this.calculateInvoiceDateRange(
+      month,
+      year,
+      closingDay,
+    );
+
+    const transactions = await this.creditCardTransactionsRepo.findMany({
+      where: {
+        creditCardId,
+        userId,
+        date: { gte: invoiceStart },
+      },
+      select: { value: true, date: true },
+    });
+
+    let currentInvoiceTotal = 0;
+    let futureTotal = 0;
+
+    for (const transaction of transactions) {
+      if (transaction.date < invoiceEnd) {
+        currentInvoiceTotal += transaction.value;
+      } else {
+        futureTotal += transaction.value;
+      }
+    }
+
+    return {
+      currentInvoiceTotal,
+      futureTotal,
+      usedLimit: currentInvoiceTotal + futureTotal,
+    };
+  }
+
+  /**
    * Fetches invoice transactions for a card, resolving the closingDay automatically.
    * Convenience wrapper for use by other modules.
    */

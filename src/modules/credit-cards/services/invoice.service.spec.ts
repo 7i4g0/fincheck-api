@@ -50,3 +50,61 @@ describe('InvoiceService date windows', () => {
     });
   });
 });
+
+describe('InvoiceService open charges', () => {
+  const creditCardTransactionsRepo = { findMany: jest.fn() };
+  const service = new InvoiceService(
+    {} as never,
+    {} as never,
+    creditCardTransactionsRepo as never,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-20T12:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('counts future installments toward the used limit', async () => {
+    creditCardTransactionsRepo.findMany.mockResolvedValue([
+      { value: 200, date: new Date('2026-08-10T12:00:00.000Z') },
+      { value: 80, date: new Date('2026-09-10T12:00:00.000Z') },
+      { value: 80, date: new Date('2026-10-10T12:00:00.000Z') },
+    ]);
+
+    await expect(
+      service.getOpenChargeTotals('user-1', 'card-1', 2),
+    ).resolves.toEqual({
+      currentInvoiceTotal: 200,
+      futureTotal: 160,
+      usedLimit: 360,
+    });
+
+    expect(creditCardTransactionsRepo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          date: { gte: new Date('2026-08-02T00:00:00.000Z') },
+        }),
+      }),
+    );
+  });
+
+  test('does not treat past invoices as open charges', async () => {
+    creditCardTransactionsRepo.findMany.mockResolvedValue([
+      { value: 50, date: new Date('2026-08-15T12:00:00.000Z') },
+    ]);
+
+    await service.getOpenChargeTotals('user-1', 'card-1', 2);
+
+    expect(creditCardTransactionsRepo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          date: { gte: new Date('2026-08-02T00:00:00.000Z') },
+        }),
+      }),
+    );
+  });
+});
